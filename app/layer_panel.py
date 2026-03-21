@@ -204,9 +204,9 @@ class LayerPanel(QWidget):
     
     def _connect_signals(self):
         """Connect layer manager signals."""
-        self.layer_manager.layer_added.connect(self._refresh_layers)
-        self.layer_manager.layer_removed.connect(self._refresh_layers)
-        self.layer_manager.layer_changed.connect(self._refresh_layers)
+        self.layer_manager.layer_added.connect(lambda: self._refresh_layers())
+        self.layer_manager.layer_removed.connect(lambda layer_id: self._refresh_layers())
+        self.layer_manager.layer_changed.connect(lambda layer_id: self._refresh_layers())
         self.layer_manager.layers_reordered.connect(self._refresh_layers)
         self.layer_manager.current_layer_changed.connect(self._on_current_changed)
     

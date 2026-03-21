@@ -115,10 +115,18 @@ class Canvas(QWidget):
         self.show_grid = show
         self.update()
     
-    def _get_canvas_point(self, widget_point: QPointF) -> QPointF:
+    def _get_canvas_point(self, widget_point) -> QPointF:
         """Convert widget coordinates to canvas coordinates."""
-        x = (widget_point.x() - self.width() / 2) / self.zoom_factor + self.canvas_width / 2 - self.offset.x()
-        y = (widget_point.y() - self.height() / 2) / self.zoom_factor + self.canvas_height / 2 - self.offset.y()
+        # Handle both QPoint and QPointF
+        if hasattr(widget_point, 'x'):
+            wx = widget_point.x()
+            wy = widget_point.y()
+        else:
+            wx = widget_point[0]
+            wy = widget_point[1]
+        
+        x = (wx - self.width() / 2) / self.zoom_factor + self.canvas_width / 2 - self.offset.x()
+        y = (wy - self.height() / 2) / self.zoom_factor + self.canvas_height / 2 - self.offset.y()
         return QPointF(x, y)
     
     def _get_widget_point(self, canvas_point: QPointF) -> QPointF:

@@ -273,10 +273,20 @@ class Layer:
             
             painter.setFont(font)
             
+            # Get text color
+            text_color = QColor(style.get('color', style.get('pen_color', '#000000')))
+            if text_color.isValid():
+                painter.setPen(QPen(text_color))
+            
             if element.points:
-                painter.drawText(element.points[0], element.text)
+                # Use x, y coordinates for drawText
+                x = int(element.points[0].x())
+                y = int(element.points[0].y())
+                if element.text:
+                    painter.drawText(x, y, element.text)
             else:
-                painter.drawText(0, 0, element.text)
+                if element.text:
+                    painter.drawText(0, 0, element.text)
         
         elif element.element_type == 'list':
             font = painter.font()
@@ -284,19 +294,25 @@ class Layer:
             font.setPointSize(font_size)
             painter.setFont(font)
             
+            # Get text color
+            text_color = QColor(style.get('color', style.get('pen_color', '#000000')))
+            if text_color.isValid():
+                painter.setPen(QPen(text_color))
+            
             list_type = style.get('list_type', 'bullet')
             y_offset = 0
             line_height = font_size + 8
             
             if element.points:
                 start_pos = element.points[0]
-                for i, line in enumerate(element.text.split('\n')):
+                text_content = element.text if element.text else ""
+                for i, line in enumerate(text_content.split('\n')):
                     if list_type == 'bullet':
-                        painter.drawText(start_pos.x(), start_pos.y() + y_offset, "• " + line)
+                        painter.drawText(int(start_pos.x()), int(start_pos.y() + y_offset), "• " + line)
                     elif list_type == 'numbered':
-                        painter.drawText(start_pos.x(), start_pos.y() + y_offset, f"{i+1}. {line}")
+                        painter.drawText(int(start_pos.x()), int(start_pos.y() + y_offset), f"{i+1}. {line}")
                     else:
-                        painter.drawText(start_pos.x(), start_pos.y() + y_offset, line)
+                        painter.drawText(int(start_pos.x()), int(start_pos.y() + y_offset), line)
                     y_offset += line_height
     
     def _draw_arrow(self, painter: QPainter, start: QPointF, end: QPointF, pen_width: int):

@@ -164,6 +164,7 @@ class FileHandler(QObject):
         """Export to SVG format."""
         try:
             from PyQt5.QtSvg import QSvgGenerator
+            from PyQt5.QtCore import QRect
             
             generator = QSvgGenerator()
             generator.setFileName(file_path)

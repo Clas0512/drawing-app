@@ -21,6 +21,8 @@ from app.layer_panel import LayerPanel
 from app.core.layer_manager import LayerManager
 from app.core.tool_manager import ToolManager
 from app.core.file_handler import FileHandler
+from app.core.tool import TextTool, ListTool
+from PyQt5.QtWidgets import QInputDialog, QLineEdit
 
 
 class MainWindow(QMainWindow):
@@ -101,6 +103,16 @@ class MainWindow(QMainWindow):
         self.toolbar_widget.grid_btn.clicked.connect(
             lambda checked: self.canvas.set_show_grid(checked)
         )
+        
+        # Set up text input callback for Text tool
+        text_tool = self.tool_manager.get_tool("Text")
+        if text_tool and isinstance(text_tool, TextTool):
+            text_tool.set_text_input_callback(self._get_text_input)
+        
+        # Set up list input callback for List tool
+        list_tool = self.tool_manager.get_tool("List")
+        if list_tool and isinstance(list_tool, ListTool):
+            list_tool.set_pending_items_callback(self._get_list_input)
     
     def _create_menus(self):
         """Create the menu bar."""
@@ -163,10 +175,12 @@ class MainWindow(QMainWindow):
         
         undo_action = QAction("&Undo", self)
         undo_action.setShortcut(QKeySequence.Undo)
+        undo_action.triggered.connect(self._undo)
         edit_menu.addAction(undo_action)
         
         redo_action = QAction("&Redo", self)
         redo_action.setShortcut(QKeySequence.Redo)
+        redo_action.triggered.connect(self._redo)
         edit_menu.addAction(redo_action)
         
         edit_menu.addSeparator()
@@ -174,6 +188,14 @@ class MainWindow(QMainWindow):
         clear_action = QAction("&Clear Canvas", self)
         clear_action.triggered.connect(self.canvas.clear_canvas)
         edit_menu.addAction(clear_action)
+        
+        # Store history
+        self._history = []
+        self._history_index = -1
+        self._max_history = 50
+        
+        # Connect drawing changes to history
+        self.canvas.drawing_changed.connect(self._save_to_history)
         
         # View menu
         view_menu = menubar.addMenu("&View")
@@ -368,11 +390,19 @@ class MainWindow(QMainWindow):
         )
         
         if file_path:
-            self.file_handler.export_image(
+            # Ensure correct extension
+            ext = 'jpg' if format == 'jpg' else format
+            if not file_path.lower().endswith(f'.{ext}'):
+                file_path += f'.{ext}'
+            
+            success = self.file_handler.export_image(
                 file_path, self.layer_manager,
                 width=self.canvas.canvas_width,
                 height=self.canvas.canvas_height
             )
+            
+            if success:
+                QMessageBox.information(self, "Export", f"Image exported to {file_path}")
     
     def _show_about(self):
         """Show about dialog."""
@@ -392,6 +422,63 @@ class MainWindow(QMainWindow):
         geometry = self.settings.value("geometry")
         if geometry:
             self.restoreGeometry(geometry)
+    
+    def _get_text_input(self) -> Optional[str]:
+        """Get text input from user via dialog."""
+        text, ok = QInputDialog.getText(
+            self, "Enter Text", "Text:",
+            QLineEdit.Normal, ""
+        )
+        if ok and text:
+            return text
+        return None
+    
+    def _get_list_input(self) -> list:
+        """Get list items from user via dialog."""
+        text, ok = QInputDialog.getMultiLineText(
+            self, "Enter List Items", "Enter one item per line:",
+            ""
+        )
+        if ok and text:
+            return [line.strip() for line in text.split('\n') if line.strip()]
+        return ["List item"]
+    
+    def _save_to_history(self):
+        """Save current state to history."""
+        try:
+            state = self.layer_manager.to_dict()
+            # Remove future history if we're not at the end
+            self._history = self._history[:self._history_index + 1]
+            self._history.append(state)
+            self._history_index = len(self._history) - 1
+            
+            # Limit history size
+            if len(self._history) > self._max_history:
+                self._history = self._history[-self._max_history:]
+                self._history_index = len(self._history) - 1
+        except Exception:
+            pass
+    
+    def _undo(self):
+        """Undo last action."""
+        if self._history_index > 0:
+            self._history_index -= 1
+            self._restore_from_history(self._history[self._history_index])
+    
+    def _redo(self):
+        """Redo last undone action."""
+        if self._history_index < len(self._history) - 1:
+            self._history_index += 1
+            self._restore_from_history(self._history[self._history_index])
+    
+    def _restore_from_history(self, state: dict):
+        """Restore layer manager from history state."""
+        try:
+            self.layer_manager.from_dict(state)
+            self.canvas._buffer_valid = False
+            self.canvas.update()
+        except Exception as e:
+            pass
     
     def closeEvent(self, event: QCloseEvent):
         """Handle window close event."""

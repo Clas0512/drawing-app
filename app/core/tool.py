@@ -301,6 +301,7 @@ class TextTool(Tool):
         super().__init__("Text", "T")
         self.text_style = 'normal'
         self.pending_text: Optional[str] = None
+        self.text_input_callback = None  # Callback to get text from UI
     
     def set_text_style(self, style: str):
         """Set text style preset."""
@@ -313,14 +314,30 @@ class TextTool(Tool):
         style['bold'] = self.text_style in ['heading', 'title']
         return style
     
+    def set_text_input_callback(self, callback):
+        """Set callback to get text input from user."""
+        self.text_input_callback = callback
+    
     def mouse_press(self, point: QPointF, layer: Layer) -> bool:
         if layer.locked:
             return False
         
+        # Get text from callback if available
+        text = "Text"
+        if self.text_input_callback:
+            try:
+                result = self.text_input_callback()
+                if result:
+                    text = result
+            except Exception:
+                pass
+        elif self.pending_text:
+            text = self.pending_text
+        
         self.start_point = point
         self.current_element = DrawingElement('text', self.get_style_dict())
         self.current_element.add_point(point)
-        self.current_element.set_text(self.pending_text or "Text")
+        self.current_element.set_text(text)
         layer.add_element(self.current_element)
         return True
     
@@ -349,6 +366,7 @@ class ListTool(Tool):
         super().__init__("List", "☰")
         self.list_type = 'bullet'
         self.pending_items: List[str] = []
+        self.items_input_callback = None  # Callback to get list items from UI
     
     def set_list_type(self, list_type: str):
         """Set list type (bullet or numbered)."""
@@ -360,16 +378,30 @@ class ListTool(Tool):
         style['font_size'] = 14
         return style
     
+    def set_pending_items_callback(self, callback):
+        """Set callback to get list items from user."""
+        self.items_input_callback = callback
+    
     def mouse_press(self, point: QPointF, layer: Layer) -> bool:
         if layer.locked:
             return False
+        
+        # Get items from callback if available
+        items = self.pending_items if self.pending_items else ["List item"]
+        if self.items_input_callback:
+            try:
+                result = self.items_input_callback()
+                if result:
+                    items = result
+            except Exception:
+                pass
         
         self.start_point = point
         self.current_element = DrawingElement('list', self.get_style_dict())
         self.current_element.add_point(point)
         
         # Join items with newlines
-        text = '\n'.join(self.pending_items) if self.pending_items else "List item"
+        text = '\n'.join(items) if items else "List item"
         self.current_element.set_text(text)
         layer.add_element(self.current_element)
         return True
