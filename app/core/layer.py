@@ -10,7 +10,7 @@ import uuid
 from typing import List, Optional, Any, Dict
 from datetime import datetime
 from PyQt5.QtGui import QImage, QPainter, QColor, QPen, QBrush
-from PyQt5.QtCore import Qt, QPointF, QRectF, QSize
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSize, QObject, pyqtSignal
 
 
 class DrawingElement:

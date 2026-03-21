@@ -154,7 +154,9 @@ class ToolToolbar(QWidget):
             btn.setCheckable(True)
             btn.setFixedSize(40, 40)
             btn.setFont(btn.font())
-            btn.clicked.connect(lambda checked, n=name: self.tool_manager.set_tool(n))
+            # Store tool name on button for identification
+            btn.setProperty("tool_name", name)
+            btn.clicked.connect(self._on_tool_button_clicked)
             
             self.tool_buttons[name] = btn
             self.tool_button_group.addButton(btn)
@@ -188,7 +190,8 @@ class ToolToolbar(QWidget):
                 f"QToolButton {{ background-color: {hex_color}; "
                 "border: 1px solid #333; border-radius: 2px; }}"
             )
-            btn.clicked.connect(lambda checked, c=hex_color: self.color_button.set_color(QColor(c)))
+            btn.setProperty("color", hex_color)
+            btn.clicked.connect(self._on_color_button_clicked)
             colors_layout.addWidget(btn)
         
         colors_layout.addStretch()
@@ -305,6 +308,22 @@ class ToolToolbar(QWidget):
     def _connect_signals(self):
         """Connect tool manager signals."""
         self.tool_manager.tool_changed.connect(self._on_tool_changed)
+    
+    def _on_tool_button_clicked(self, checked=False):
+        """Handle tool button click by getting tool name from button property."""
+        sender = self.sender()
+        if sender:
+            tool_name = sender.property("tool_name")
+            if tool_name:
+                self.tool_manager.set_tool(tool_name)
+    
+    def _on_color_button_clicked(self, checked=False):
+        """Handle color button click by getting color from button property."""
+        sender = self.sender()
+        if sender:
+            color_hex = sender.property("color")
+            if color_hex:
+                self.color_button.set_color(QColor(color_hex))
     
     def _on_tool_changed(self, tool_name: str):
         """Handle tool change."""

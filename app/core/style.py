@@ -286,6 +286,16 @@ class CombinedStyle:
         """Get current pen width."""
         return self.drawing.pen_width
     
+    def get_style_dict(self) -> Dict[str, Any]:
+        """Get style as a dictionary for elements - combines drawing and text styles."""
+        # Start with drawing style
+        style = self.drawing.get_style_dict()
+        # Add text style
+        style.update(self.text.get_style_dict())
+        # Add current color
+        style['current_color'] = self.current_color.name()
+        return style
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
