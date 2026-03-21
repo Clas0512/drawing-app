@@ -254,9 +254,12 @@ class BoxTool(Tool):
     
     def get_style_dict(self) -> Dict[str, Any]:
         style = super().get_style_dict()
-        # Use pen_color as fill color, with configurable alpha
-        style['fill_color'] = style.get('pen_color', '#FFFFFF')
-        style['fill_alpha'] = self.fill_alpha
+        # Preserve fill_color from style (set by fill color button)
+        # If not set, use white with default alpha
+        if 'fill_color' not in style or not style.get('fill_color'):
+            style['fill_color'] = '#FFFFFF'
+        if 'fill_alpha' not in style:
+            style['fill_alpha'] = self.fill_alpha
         return style
     
     def set_fill_alpha(self, alpha: int):

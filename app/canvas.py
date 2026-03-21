@@ -63,6 +63,9 @@ class Canvas(QWidget):
         # Enable smooth rendering
         self.setAttribute(Qt.WA_OpaquePaintEvent)
         
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+        
         # Connect signals
         self.layer_manager.layer_changed.connect(self._on_layer_changed)
         self.layer_manager.layers_reordered.connect(self.update)
@@ -158,6 +161,31 @@ class Canvas(QWidget):
         
         self.update()
     
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """Handle double-click for editing elements."""
+        if event.button() == Qt.LeftButton:
+            point = self._get_canvas_point(event.pos())
+            self._open_edit_dialog_at(point)
+    
+    def _open_edit_dialog_at(self, point):
+        """Open edit dialog for element at point."""
+        current_layer = self.layer_manager.get_current_layer()
+        if current_layer:
+            for element in reversed(current_layer.elements):
+                for p in element.points:
+                    if abs(p.x() - point.x()) < 15 and abs(p.y() - point.y()) < 15:
+                        try:
+                            from app.dialogs.element_edit_dialog import ElementEditDialog
+                            dialog = ElementEditDialog(element, self)
+                            if dialog.exec_() == dialog.Accepted:
+                                dialog.apply_changes()
+                                self._buffer_valid = False
+                                self.update()
+                                self.drawing_changed.emit()
+                        except Exception:
+                            pass
+                        return
+    
     def mouseMoveEvent(self, event: QMouseEvent):
         """Handle mouse move events."""
         point = self._get_canvas_point(event.pos())
@@ -208,11 +236,30 @@ class Canvas(QWidget):
         delta = event.angleDelta().y()
         
         if event.modifiers() & Qt.ControlModifier:
-            # Zoom
+            # Zoom focused on cursor position
+            cursor_widget = event.pos()
+            
+            # Get cursor position in canvas coordinates before zoom
+            cx = (cursor_widget.x() - self.width() / 2) / self.zoom_factor + self.canvas_width / 2 - self.offset.x()
+            cy = (cursor_widget.y() - self.height() / 2) / self.zoom_factor + self.canvas_height / 2 - self.offset.y()
+            
+            old_zoom = self.zoom_factor
             if delta > 0:
-                self.zoom_in()
+                new_zoom = min(5.0, self.zoom_factor * 1.2)
             else:
-                self.zoom_out()
+                new_zoom = max(0.1, self.zoom_factor / 1.2)
+            
+            # Calculate new offset so (cx, cy) stays at cursor position
+            self.zoom_factor = new_zoom
+            
+            # New offset needed: (cx, cy) should map to cursor_widget position
+            # screen_x = (cx - canvas_w/2 + offset_x) * zoom + w/2
+            # cursor_widget.x() = (cx - canvas_w/2 + new_offset_x) * new_zoom + w/2
+            # new_offset_x = (cursor_widget.x() - w/2) / new_zoom - cx + canvas_w/2
+            new_offset_x = (cursor_widget.x() - self.width() / 2) / new_zoom - cx + self.canvas_width / 2
+            new_offset_y = (cursor_widget.y() - self.height() / 2) / new_zoom - cy + self.canvas_height / 2
+            
+            self.offset = QPointF(new_offset_x, new_offset_y)
         else:
             # Scroll
             scroll_amount = 50
@@ -335,6 +382,106 @@ class Canvas(QWidget):
     def resizeEvent(self, event: QResizeEvent):
         """Handle resize events."""
         super().resizeEvent(event)
+    
+    # Drag and drop support
+    def dragEnterEvent(self, event):
+        """Handle drag enter event."""
+        if event.mimeData().hasUrls() or event.mimeData().hasImage():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move event."""
+        if event.mimeData().hasUrls() or event.mimeData().hasImage():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def dropEvent(self, event):
+        """Handle drop event - import files to canvas."""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                file_path = url.toLocalFile()
+                if file_path:
+                    self._import_file(file_path, event.pos())
+            event.acceptProposedAction()
+        elif event.mimeData().hasImage():
+            # Handle raw image data
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def _import_file(self, file_path, drop_pos):
+        """Import a file to the canvas."""
+        import os
+        from app.core.layer import DrawingElement
+        
+        ext = os.path.splitext(file_path)[1].lower()
+        point = self._get_canvas_point(drop_pos)
+        
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer or current_layer.locked:
+            return
+        
+        if ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg']:
+            # Image file - create a box with image info
+            element = DrawingElement('box', {
+                'pen_color': '#333333',
+                'fill_color': '#EEEEEE',
+                'fill_alpha': 255,
+                'pen_width': 2,
+                'image_path': file_path
+            })
+            element.add_point(point)
+            element.add_point(QPointF(point.x() + 200, point.y() + 150))
+            current_layer.add_element(element)
+            
+            # Also add filename text
+            text_el = DrawingElement('text', {
+                'text_style': 'normal',
+                'font_size': 12,
+                'color': '#333333'
+            })
+            text_el.add_point(QPointF(point.x() + 5, point.y() + 20))
+            text_el.set_text(os.path.basename(file_path))
+            current_layer.add_element(text_el)
+            
+        elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+            # Sound file - create a note
+            element = DrawingElement('box', {
+                'pen_color': '#FF6600',
+                'fill_color': '#FFF0E0',
+                'fill_alpha': 200,
+                'pen_width': 2
+            })
+            element.add_point(point)
+            element.add_point(QPointF(point.x() + 180, point.y() + 60))
+            current_layer.add_element(element)
+            
+            text_el = DrawingElement('text', {
+                'text_style': 'normal',
+                'font_size': 12,
+                'color': '#FF6600'
+            })
+            text_el.add_point(QPointF(point.x() + 5, point.y() + 20))
+            text_el.set_text(f"♪ {os.path.basename(file_path)}")
+            current_layer.add_element(text_el)
+            
+        else:
+            # Other file - just show filename
+            element = DrawingElement('text', {
+                'text_style': 'normal',
+                'font_size': 14,
+                'color': '#0066CC'
+            })
+            element.add_point(point)
+            element.set_text(f"📎 {os.path.basename(file_path)}")
+            current_layer.add_element(element)
+        
+        self._buffer_valid = False
+        self.update()
+        self.drawing_changed.emit()
     
     def get_canvas_image(self, width: int = None, height: int = None) -> QImage:
         """Get the current canvas as an image."""

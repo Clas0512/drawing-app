@@ -170,31 +170,56 @@ class ToolToolbar(QWidget):
         
         # Colors section
         colors_group = QGroupBox("Colors")
-        colors_layout = QHBoxLayout(colors_group)
+        colors_layout = QVBoxLayout(colors_group)
         
+        # Border color row
+        border_row = QHBoxLayout()
+        border_row.addWidget(QLabel("Border:"))
         self.color_button = ColorButton(QColor('#000000'))
         self.color_button.color_changed.connect(self.tool_manager.set_color)
-        colors_layout.addWidget(self.color_button)
+        border_row.addWidget(self.color_button)
+        border_row.addStretch()
+        colors_layout.addLayout(border_row)
         
-        # Quick color palette
+        # Fill color row
+        fill_row = QHBoxLayout()
+        fill_row.addWidget(QLabel("Fill:"))
+        self.fill_color_button = ColorButton(QColor('#FFFFFF'))
+        self.fill_color_button.color_changed.connect(self._on_fill_color_changed)
+        fill_row.addWidget(self.fill_color_button)
+        
+        # Transparent fill checkbox
+        self.no_fill_cb = QCheckBox("None")
+        self.no_fill_cb.setChecked(False)
+        self.no_fill_cb.stateChanged.connect(self._on_no_fill_changed)
+        fill_row.addWidget(self.no_fill_cb)
+        fill_row.addStretch()
+        colors_layout.addLayout(fill_row)
+        
+        # Quick color palette (applies to selected color type)
+        palette_label = QLabel("Quick colors:")
+        colors_layout.addWidget(palette_label)
+        palette_layout = QHBoxLayout()
         palette_colors = [
             '#000000', '#FFFFFF', '#FF0000', '#00FF00',
             '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF',
             '#FFA500', '#800080', '#808080', '#A52A2A',
         ]
+        self.current_color_target = 'border'  # 'border' or 'fill'
         
         for hex_color in palette_colors:
             btn = QToolButton()
-            btn.setFixedSize(24, 24)
+            btn.setFixedSize(20, 20)
             btn.setStyleSheet(
                 f"QToolButton {{ background-color: {hex_color}; "
                 "border: 1px solid #333; border-radius: 2px; }}"
             )
             btn.setProperty("color", hex_color)
-            btn.clicked.connect(self._on_color_button_clicked)
-            colors_layout.addWidget(btn)
+            btn.clicked.connect(self._on_palette_color_clicked)
+            palette_layout.addWidget(btn)
         
-        colors_layout.addStretch()
+        palette_layout.addStretch()
+        colors_layout.addLayout(palette_layout)
         layout.addWidget(colors_group)
         
         # Pen width section
@@ -323,7 +348,39 @@ class ToolToolbar(QWidget):
         if sender:
             color_hex = sender.property("color")
             if color_hex:
-                self.color_button.set_color(QColor(color_hex))
+                if self.current_color_target == 'border':
+                    self.color_button.set_color(QColor(color_hex))
+                else:
+                    self.fill_color_button.set_color(QColor(color_hex))
+    
+    def _on_fill_color_changed(self, color):
+        """Handle fill color change."""
+        # Update tool manager with fill color
+        if hasattr(self.tool_manager, 'set_fill_color'):
+            self.tool_manager.set_fill_color(color)
+        # Also update combined style
+        self.tool_manager.style.drawing.set_fill_color(color)
+    
+    def _on_no_fill_changed(self, state):
+        """Handle no fill checkbox."""
+        if state == Qt.Checked:
+            # Set transparent fill
+            transparent = QColor(0, 0, 0, 0)
+            self.tool_manager.style.drawing.set_fill_color(transparent, 0)
+        else:
+            # Restore fill color
+            self.tool_manager.style.drawing.set_fill_color(self.fill_color_button.get_color(), 200)
+    
+    def _on_palette_color_clicked(self, checked=False):
+        """Handle palette color click."""
+        sender = self.sender()
+        if sender:
+            color_hex = sender.property("color")
+            if color_hex:
+                if self.current_color_target == 'border':
+                    self.color_button.set_color(QColor(color_hex))
+                else:
+                    self.fill_color_button.set_color(QColor(color_hex))
     
     def _on_tool_changed(self, tool_name: str):
         """Handle tool change."""

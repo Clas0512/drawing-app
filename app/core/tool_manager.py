@@ -98,6 +98,13 @@ class ToolManager(QObject):
             self.current_tool.set_style(self.style)
         self.style_changed.emit()
     
+    def set_fill_color(self, color):
+        """Set the fill color for shapes."""
+        self.style.drawing.set_fill_color(color)
+        if self.current_tool:
+            self.current_tool.set_style(self.style)
+        self.style_changed.emit()
+    
     def set_pen_width(self, width: int):
         """Set the current pen width."""
         self.style.set_pen_width(width)
