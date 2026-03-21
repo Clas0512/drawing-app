@@ -44,7 +44,6 @@ A modular Qt-based drawing application with layer support, multiple drawing tool
 ## Project Structure
 
 ```
-zed-base/
 ├── main.py                 # Application entry point
 ├── app/
 │   ├── __init__.py
