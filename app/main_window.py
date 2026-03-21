@@ -113,6 +113,9 @@ class MainWindow(QMainWindow):
         list_tool = self.tool_manager.get_tool("List")
         if list_tool and isinstance(list_tool, ListTool):
             list_tool.set_pending_items_callback(self._get_list_input)
+        
+        # Connect layer panel changes to canvas update
+        self.layer_panel.layer_changed.connect(lambda: self.canvas.update())
     
     def _create_menus(self):
         """Create the menu bar."""

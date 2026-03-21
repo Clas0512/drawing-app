@@ -72,12 +72,14 @@ class LayerItemWidget(QWidget):
         """Handle visibility change."""
         self.layer.set_visible(state == Qt.Checked)
         self.visibility_changed.emit(self.layer.id, state == Qt.Checked)
+        self.layer_changed.emit()  # Trigger canvas update
     
     def _on_lock_changed(self, state):
         """Handle lock change."""
         self.layer.set_locked(state == Qt.Checked)
         self.lock_cb.setText("🔒" if state == Qt.Checked else "🔓")
         self.lock_changed.emit(self.layer.id, state == Qt.Checked)
+        self.layer_changed.emit()  # Trigger canvas update
     
     def update_display(self):
         """Update the display with current layer state."""
@@ -102,6 +104,9 @@ class LayerPanel(QWidget):
     - Grouping layers
     - Overlay view toggle
     """
+    
+    # Signal emitted when any layer property changes
+    layer_changed = pyqtSignal()
     
     def __init__(self, layer_manager: LayerManager):
         super().__init__()
@@ -333,6 +338,7 @@ class LayerPanel(QWidget):
         )
         if ok:
             self.layer_manager.create_layer(name if name else None)
+            self.layer_changed.emit()  # Trigger canvas update
     
     def _add_group(self):
         """Add a new group."""
@@ -362,6 +368,7 @@ class LayerPanel(QWidget):
         if current:
             current.set_opacity(value / 100.0)
             self.layer_manager.layer_changed.emit(current.id)
+            self.layer_changed.emit()  # Trigger canvas update
     
     def _move_up(self):
         """Move current layer up."""
@@ -387,6 +394,7 @@ class LayerPanel(QWidget):
             )
             if reply == QMessageBox.Yes:
                 self.layer_manager.remove_layer(current)
+                self.layer_changed.emit()  # Trigger canvas update
     
     def _clear_layer(self):
         """Clear current layer content."""
@@ -400,3 +408,4 @@ class LayerPanel(QWidget):
             )
             if reply == QMessageBox.Yes:
                 self.layer_manager.clear_layer(current)
+                self.layer_changed.emit()  # Trigger canvas update

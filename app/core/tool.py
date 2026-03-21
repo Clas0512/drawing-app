@@ -250,19 +250,18 @@ class BoxTool(Tool):
     
     def __init__(self):
         super().__init__("Box", "📦")
-        self.fill_color = QColor('#FFFFFF')
-        self.fill_alpha = 200
-    
-    def set_fill_color(self, color: QColor, alpha: int = 200):
-        """Set the fill color."""
-        self.fill_color = color
-        self.fill_alpha = alpha
+        self.fill_alpha = 200  # Default fill alpha (transparency)
     
     def get_style_dict(self) -> Dict[str, Any]:
         style = super().get_style_dict()
-        style['fill_color'] = self.fill_color.name()
+        # Use pen_color as fill color, with configurable alpha
+        style['fill_color'] = style.get('pen_color', '#FFFFFF')
         style['fill_alpha'] = self.fill_alpha
         return style
+    
+    def set_fill_alpha(self, alpha: int):
+        """Set the fill transparency (0-255)."""
+        self.fill_alpha = max(0, min(255, alpha))
     
     def mouse_press(self, point: QPointF, layer: Layer) -> bool:
         if layer.locked:
@@ -484,17 +483,93 @@ class SelectTool(Tool):
         super().__init__("Select", "🖐️")
         self.selected_element: Optional[DrawingElement] = None
         self.selection_offset = QPointF(0, 0)
+        self.hit_tolerance = 10  # Pixels tolerance for hit detection
+    
+    def _point_in_element(self, point: QPointF, element: DrawingElement) -> bool:
+        """Check if point is inside or near an element."""
+        if not element.points:
+            return False
+        
+        # For elements with bounding rect (shapes), check if point is inside
+        if element.element_type in ['rectangle', 'ellipse', 'box']:
+            if len(element.points) >= 2:
+                rect = QRectF(element.points[0], element.points[1])
+                # Expand rect by tolerance
+                expanded = rect.adjusted(-self.hit_tolerance, -self.hit_tolerance,
+                                        self.hit_tolerance, self.hit_tolerance)
+                return expanded.contains(point)
+        
+        # For lines and arrows, check distance to line segment
+        if element.element_type in ['line', 'arrow']:
+            if len(element.points) >= 2:
+                return self._point_near_line(point, element.points[0], element.points[1])
+        
+        # For pen paths, check distance to any point
+        if element.element_type == 'pen':
+            for p in element.points:
+                if abs(p.x() - point.x()) < self.hit_tolerance and \
+                   abs(p.y() - point.y()) < self.hit_tolerance:
+                    return True
+            # Also check distance to line segments
+            for i in range(1, len(element.points)):
+                if self._point_near_line(point, element.points[i-1], element.points[i]):
+                    return True
+        
+        # For text and lists, check if near the start point
+        if element.element_type in ['text', 'list']:
+            if element.points:
+                p = element.points[0]
+                # Estimate text bounds (rough)
+                return abs(p.x() - point.x()) < 100 and abs(p.y() - point.y()) < 50
+        
+        # Fallback: check any point
+        for p in element.points:
+            if abs(p.x() - point.x()) < self.hit_tolerance and \
+               abs(p.y() - point.y()) < self.hit_tolerance:
+                return True
+        
+        return False
+    
+    def _point_near_line(self, point: QPointF, p1: QPointF, p2: QPointF) -> bool:
+        """Check if point is near a line segment."""
+        # Calculate distance from point to line segment
+        x0, y0 = point.x(), point.y()
+        x1, y1 = p1.x(), p1.y()
+        x2, y2 = p2.x(), p2.y()
+        
+        # Line segment length squared
+        dx = x2 - x1
+        dy = y2 - y1
+        length_sq = dx * dx + dy * dy
+        
+        if length_sq == 0:
+            # Point is the same
+            return abs(x0 - x1) < self.hit_tolerance and abs(y0 - y1) < self.hit_tolerance
+        
+        # Calculate projection parameter
+        t = max(0, min(1, ((x0 - x1) * dx + (y0 - y1) * dy) / length_sq))
+        
+        # Nearest point on line
+        nearest_x = x1 + t * dx
+        nearest_y = y1 + t * dy
+        
+        # Distance to nearest point
+        dist = ((x0 - nearest_x) ** 2 + (y0 - nearest_y) ** 2) ** 0.5
+        
+        return dist < self.hit_tolerance
     
     def mouse_press(self, point: QPointF, layer: Layer) -> bool:
         self.start_point = point
         
-        # Find element at point
+        # Find element at point (check from top to bottom)
         for element in reversed(layer.elements):
-            for p in element.points:
-                if abs(p.x() - point.x()) < 10 and abs(p.y() - point.y()) < 10:
-                    self.selected_element = element
-                    self.selection_offset = QPointF(point.x() - p.x(), point.y() - p.y())
-                    return True
+            if self._point_in_element(point, element):
+                self.selected_element = element
+                # Calculate offset from first point
+                if element.points:
+                    self.selection_offset = QPointF(point.x() - element.points[0].x(),
+                                                    point.y() - element.points[0].y())
+                return True
         
         self.selected_element = None
         return False
