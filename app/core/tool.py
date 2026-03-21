@@ -7,7 +7,7 @@ Each tool handles user input and creates appropriate drawing elements.
 
 from typing import Optional, Dict, Any, List, Callable
 from abc import ABC, abstractmethod
-from PyQt5.QtCore import QPointF, Qt
+from PyQt5.QtCore import QPointF, Qt, QRectF
 from PyQt5.QtGui import QColor
 
 from app.core.layer import Layer, DrawingElement

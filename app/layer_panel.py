@@ -311,6 +311,28 @@ class LayerPanel(QWidget):
                 
                 menu.addSeparator()
                 
+                # Add to group submenu
+                add_to_group_menu = menu.addMenu("Add to Group")
+                groups = [g for g in self.layer_manager.layers if isinstance(g, LayerGroup)]
+                if groups:
+                    for group in groups:
+                        action = QAction(group.name, self)
+                        action.triggered.connect(lambda checked=False, g=group, l=layer: self._add_to_group(l, g))
+                        add_to_group_menu.addAction(action)
+                else:
+                    no_groups = QAction("No groups available", self)
+                    no_groups.setEnabled(False)
+                    add_to_group_menu.addAction(no_groups)
+                
+                # Remove from group (if in a group)
+                for group in [g for g in self.layer_manager.layers if isinstance(g, LayerGroup)]:
+                    if layer in group.layers:
+                        remove_action = QAction(f"Remove from '{group.name}'", self)
+                        remove_action.triggered.connect(lambda checked=False, g=group, l=layer: self._remove_from_group(l, g))
+                        menu.addAction(remove_action)
+                
+                menu.addSeparator()
+                
                 # Delete action
                 delete_action = QAction("Delete", self)
                 delete_action.triggered.connect(self._delete_layer)
@@ -409,3 +431,15 @@ class LayerPanel(QWidget):
             if reply == QMessageBox.Yes:
                 self.layer_manager.clear_layer(current)
                 self.layer_changed.emit()  # Trigger canvas update
+    
+    def _add_to_group(self, layer: Layer, group: LayerGroup):
+        """Add a layer to a group."""
+        self.layer_manager.add_to_group(layer, group)
+        self._refresh_layers()
+        self.layer_changed.emit()
+    
+    def _remove_from_group(self, layer: Layer, group: LayerGroup):
+        """Remove a layer from a group."""
+        self.layer_manager.remove_from_group(layer, group)
+        self._refresh_layers()
+        self.layer_changed.emit()
