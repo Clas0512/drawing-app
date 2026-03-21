@@ -254,10 +254,13 @@ class BoxTool(Tool):
     
     def get_style_dict(self) -> Dict[str, Any]:
         style = super().get_style_dict()
-        # Preserve fill_color from style (set by fill color button)
-        # If not set, use white with default alpha
-        if 'fill_color' not in style or not style.get('fill_color'):
+        # Get fill_color from style - may be QColor or hex string
+        # Preserve it properly for rendering
+        if 'fill_color' not in style or style.get('fill_color') is None:
             style['fill_color'] = '#FFFFFF'
+        elif isinstance(style['fill_color'], QColor):
+            # Keep QColor as-is, rendering will handle it
+            pass
         if 'fill_alpha' not in style:
             style['fill_alpha'] = self.fill_alpha
         return style
@@ -493,42 +496,56 @@ class SelectTool(Tool):
         if not element.points:
             return False
         
+        tol = self.hit_tolerance
+        
         # For elements with bounding rect (shapes), check if point is inside
+        # Normalize rect to handle any point order (mouse can go any direction)
         if element.element_type in ['rectangle', 'ellipse', 'box']:
             if len(element.points) >= 2:
-                rect = QRectF(element.points[0], element.points[1])
-                # Expand rect by tolerance
-                expanded = rect.adjusted(-self.hit_tolerance, -self.hit_tolerance,
-                                        self.hit_tolerance, self.hit_tolerance)
-                return expanded.contains(point)
+                x1, y1 = element.points[0].x(), element.points[0].y()
+                x2, y2 = element.points[1].x(), element.points[1].y()
+                # Normalize to proper rect (min/max)
+                left, right = min(x1, x2), max(x1, x2)
+                top, bottom = min(y1, y2), max(y1, y2)
+                # Expand by tolerance for easy clicking
+                return (left - tol <= point.x() <= right + tol) and (top - tol <= point.y() <= bottom + tol)
         
         # For lines and arrows, check distance to line segment
         if element.element_type in ['line', 'arrow']:
             if len(element.points) >= 2:
                 return self._point_near_line(point, element.points[0], element.points[1])
         
-        # For pen paths, check distance to any point
+        # For pen paths, primarily check distance to line segments
         if element.element_type == 'pen':
-            for p in element.points:
-                if abs(p.x() - point.x()) < self.hit_tolerance and \
-                   abs(p.y() - point.y()) < self.hit_tolerance:
+            if len(element.points) >= 2:
+                for i in range(1, len(element.points)):
+                    if self._point_near_line(point, element.points[i-1], element.points[i]):
+                        return True
+            # Also check endpoints
+            if element.points:
+                p = element.points[0]
+                if abs(p.x() - point.x()) < tol and abs(p.y() - point.y()) < tol:
                     return True
-            # Also check distance to line segments
-            for i in range(1, len(element.points)):
-                if self._point_near_line(point, element.points[i-1], element.points[i]):
-                    return True
+                if len(element.points) > 1:
+                    p = element.points[-1]
+                    if abs(p.x() - point.x()) < tol and abs(p.y() - point.y()) < tol:
+                        return True
+            return False
         
-        # For text and lists, check if near the start point
+        # For text and lists, check if within text bounding area
         if element.element_type in ['text', 'list']:
             if element.points:
                 p = element.points[0]
-                # Estimate text bounds (rough)
-                return abs(p.x() - point.x()) < 100 and abs(p.y() - point.y()) < 50
+                # Estimate text bounds based on content length
+                text = getattr(element, 'text', '') or 'Text'
+                text_width = len(text) * 8 + 20
+                text_height = 30
+                return (p.x() - 5 <= point.x() <= p.x() + text_width) and \
+                       (p.y() - 25 <= point.y() <= p.y() + text_height)
         
-        # Fallback: check any point
+        # Fallback: check any point with tolerance
         for p in element.points:
-            if abs(p.x() - point.x()) < self.hit_tolerance and \
-               abs(p.y() - point.y()) < self.hit_tolerance:
+            if abs(p.x() - point.x()) < tol and abs(p.y() - point.y()) < tol:
                 return True
         
         return False

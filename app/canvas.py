@@ -168,23 +168,94 @@ class Canvas(QWidget):
             self._open_edit_dialog_at(point)
     
     def _open_edit_dialog_at(self, point):
-        """Open edit dialog for element at point."""
+        """Open edit dialog for element at point, or create new text if none found."""
         current_layer = self.layer_manager.get_current_layer()
-        if current_layer:
-            for element in reversed(current_layer.elements):
+        if not current_layer or current_layer.locked:
+            return
+        
+        # Try to find existing element to edit (check full bounding area for shapes)
+        tol = 15
+        for element in reversed(current_layer.elements):
+            found = False
+            if not element.points:
+                continue
+            
+            if element.element_type in ['rectangle', 'ellipse', 'box'] and len(element.points) >= 2:
+                # Check if point is inside bounding rect
+                x1, y1 = element.points[0].x(), element.points[0].y()
+                x2, y2 = element.points[1].x(), element.points[1].y()
+                left, right = min(x1, x2), max(x1, x2)
+                top, bottom = min(y1, y2), max(y1, y2)
+                found = (left - tol <= point.x() <= right + tol) and (top - tol <= point.y() <= bottom + tol)
+            elif element.element_type in ['line', 'arrow'] and len(element.points) >= 2:
+                # Check distance to line
+                found = self._point_near_line(point, element.points[0], element.points[1], tol)
+            elif element.element_type == 'pen':
+                # Check distance to any segment
+                for i in range(1, len(element.points)):
+                    if self._point_near_line(point, element.points[i-1], element.points[i], tol):
+                        found = True
+                        break
+            else:
+                # Text, list, etc - check near first point
                 for p in element.points:
-                    if abs(p.x() - point.x()) < 15 and abs(p.y() - point.y()) < 15:
-                        try:
-                            from app.dialogs.element_edit_dialog import ElementEditDialog
-                            dialog = ElementEditDialog(element, self)
-                            if dialog.exec_() == dialog.Accepted:
-                                dialog.apply_changes()
-                                self._buffer_valid = False
-                                self.update()
-                                self.drawing_changed.emit()
-                        except Exception:
-                            pass
-                        return
+                    if abs(p.x() - point.x()) < tol and abs(p.y() - point.y()) < tol:
+                        found = True
+                        break
+            
+            if found:
+                try:
+                    from app.dialogs.element_edit_dialog import ElementEditDialog
+                    dialog = ElementEditDialog(element, self)
+                    if dialog.exec_() == dialog.Accepted:
+                        dialog.apply_changes()
+                        self._buffer_valid = False
+                        self.update()
+                        self.drawing_changed.emit()
+                except Exception:
+                    pass
+                return
+        
+        # No element found at point - create new text
+        self._create_text_at(point)
+    
+    def _point_near_line(self, point, p1, p2, tol=15):
+        """Check if point is near a line segment."""
+        x0, y0 = point.x(), point.y()
+        x1, y1 = p1.x(), p1.y()
+        x2, y2 = p2.x(), p2.y()
+        dx, dy = x2 - x1, y2 - y1
+        length_sq = dx * dx + dy * dy
+        if length_sq == 0:
+            return abs(x0 - x1) < tol and abs(y0 - y1) < tol
+        t = max(0, min(1, ((x0 - x1) * dx + (y0 - y1) * dy) / length_sq))
+        nearest_x, nearest_y = x1 + t * dx, y1 + t * dy
+        dist = ((x0 - nearest_x) ** 2 + (y0 - nearest_y) ** 2) ** 0.5
+        return dist < tol
+    
+    def _create_text_at(self, point):
+        """Create a new text element at the given point."""
+        from PyQt5.QtWidgets import QInputDialog, QLineEdit
+        text, ok = QInputDialog.getText(
+            self, "New Text", "Enter text:",
+            QLineEdit.Normal, ""
+        )
+        if not ok or not text:
+            return
+        
+        from app.core.layer import DrawingElement
+        # Create text element with current style
+        style = self.tool_manager.get_current_style().get_style_dict()
+        style['font_size'] = 14
+        element = DrawingElement('text', style)
+        element.add_point(point)
+        element.set_text(text)
+        current_layer = self.layer_manager.get_current_layer()
+        current_layer.add_element(element)
+        
+        self._buffer_valid = False
+        self.update()
+        self.drawing_changed.emit()
     
     def mouseMoveEvent(self, event: QMouseEvent):
         """Handle mouse move events."""

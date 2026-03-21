@@ -241,9 +241,21 @@ class Layer:
             if len(element.points) >= 2:
                 rect = QRectF(element.points[0], element.points[1])
                 # Draw filled box with border
-                fill_color = QColor(style.get('fill_color', '#ffffff'))
-                fill_color.setAlpha(style.get('fill_alpha', 200))
+                fc = style.get('fill_color', '#ffffff')
+                if isinstance(fc, QColor):
+                    fill_color = QColor(fc)
+                else:
+                    fill_color = QColor(fc if fc else '#ffffff')
+                fill_alpha = style.get('fill_alpha', 200)
+                if isinstance(fc, QColor):
+                    fill_alpha = fc.alpha()
+                fill_color.setAlpha(fill_alpha)
                 painter.fillRect(rect, fill_color)
+                # Draw border with pen_color
+                pen_color = QColor(style.get('pen_color', '#000000'))
+                pen_color.setAlpha(style.get('pen_color_alpha', 255))
+                pen = QPen(pen_color, style.get('pen_width', 2))
+                painter.setPen(pen)
                 painter.drawRect(rect)
         
         elif element.element_type == 'text':
