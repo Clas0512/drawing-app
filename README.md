@@ -2,6 +2,24 @@
 
 A modular Qt-based drawing application with layer support, multiple drawing tools, text styles, file management, user authentication, and real-time collaboration.
 
+## Quick Start
+
+```bash
+# 1. Install dependencies
+pip install PyQt5 Pillow Flask Flask-SQLAlchemy Flask-Login Flask-SocketIO \
+            Flask-CORS psycopg[binary] alembic PyJWT passlib python-dotenv \
+            httpx python-socketio email-validator authlib
+
+# 2. Setup database (interactive)
+python setup_database.py
+
+# 3. Start the server
+python run_server.py
+
+# 4. In another terminal, start the client
+python main.py
+```
+
 ## Features
 
 ### Drawing Tools
@@ -61,6 +79,7 @@ A modular Qt-based drawing application with layer support, multiple drawing tool
 drawing-app/
 ├── main.py                 # Application entry point
 ├── run_server.py           # Flask server entry point
+├── setup_database.py       # Database setup script
 ├── alembic.ini             # Database migration config
 ├── .env.example            # Environment variables template
 ├── app/
@@ -102,10 +121,21 @@ drawing-app/
 │       ├── style.py        # Style definitions
 │       └── file_handler.py # Save/Open/Export
 ├── migrations/             # Database migrations
+│   ├── env.py             # Alembic environment
+│   ├── script.py.mako     # Migration template
+│   └── versions/          # Migration versions
+│       └── 001_initial.py # Initial schema
 └── pyproject.toml
 ```
 
 ## Installation
+
+### Prerequisites
+
+1. **Python 3.13+** - Make sure Python is installed
+2. **PostgreSQL 12+** - Database server
+
+### Installing Dependencies
 
 ```bash
 # Using Poetry
@@ -119,15 +149,135 @@ pip install PyQt5 Pillow Flask Flask-SQLAlchemy Flask-Login Flask-SocketIO \
 
 ## Database Setup
 
-```bash
-# Create PostgreSQL database
-createdb drawing_app
+### Step 1: Install and Start PostgreSQL
 
-# Run migrations
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install postgresql postgresql-contrib
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+```
+
+**macOS (using Homebrew):**
+```bash
+brew install postgresql
+brew services start postgresql
+```
+
+**Windows:**
+Download and install from https://www.postgresql.org/download/windows/
+
+### Step 2: Configure Database Connection
+
+Copy the example environment file and configure:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your database credentials:
+```env
+DATABASE_URL=postgresql://postgres:your_password@localhost:5432/drawing_app
+SECRET_KEY=your-secret-key-change-in-production
+JWT_SECRET_KEY=your-jwt-secret-key-change-in-production
+```
+
+### Step 3: Initialize the Database
+
+**Option A: Using the setup script (Recommended)**
+
+The setup script handles everything automatically - creating the database, running migrations, and optionally creating an admin user:
+
+```bash
+# Interactive setup (recommended for first-time setup)
+python setup_database.py
+
+# Or non-interactive full initialization
+python setup_database.py --init --admin-user admin --admin-password yourpassword
+
+# Other options:
+python setup_database.py --create-db        # Create database only
+python setup_database.py --migrate          # Run migrations only
+python setup_database.py --reset            # Reset database (drop and recreate)
+```
+
+**Option B: Manual setup**
+
+If you prefer manual setup:
+
+```bash
+# 1. Create the database (using psql or createdb)
+sudo -u postgres psql -c "CREATE DATABASE drawing_app;"
+
+# 2. Run migrations using Alembic
 alembic upgrade head
 
-# Or initialize database directly
+# 3. Or create tables directly using Flask CLI
 flask init-db
+
+# 4. Create an admin user (optional)
+flask create-admin admin admin@example.com yourpassword
+```
+
+**Option C: Using SQLAlchemy directly**
+
+If migrations fail, you can create tables directly:
+
+```python
+# Run this in Python shell
+from app.server.app_factory import create_app
+from app.server.models.user import db
+
+app = create_app('development')
+with app.app_context():
+    db.create_all()
+    print("Tables created!")
+```
+
+### Step 4: Verify Database Setup
+
+```bash
+# Check database connection
+python setup_database.py --migrate
+
+# Or manually verify
+psql -d drawing_app -c "\dt"  # List all tables
+```
+
+### Troubleshooting Database Issues
+
+**Connection refused error:**
+```bash
+# Check if PostgreSQL is running
+sudo systemctl status postgresql  # Linux
+brew services list                 # macOS
+
+# Start if not running
+sudo systemctl start postgresql   # Linux
+brew services start postgresql    # macOS
+```
+
+**Authentication failed:**
+```bash
+# Reset PostgreSQL password
+sudo -u postgres psql
+ALTER USER postgres PASSWORD 'your_password';
+```
+
+**Database doesn't exist:**
+```bash
+# Create database manually
+sudo -u postgres createdb drawing_app
+# Or
+python setup_database.py --create-db
+```
+
+**Permission denied:**
+```bash
+# Grant permissions to user
+sudo -u postgres psql
+GRANT ALL PRIVILEGES ON DATABASE drawing_app TO postgres;
 ```
 
 ## Usage
