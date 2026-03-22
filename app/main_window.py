@@ -24,6 +24,12 @@ from app.core.file_handler import FileHandler
 from app.core.tool import TextTool, ListTool
 from PyQt5.QtWidgets import QInputDialog, QLineEdit
 
+# Import client components
+from app.client.api_client import APIClient
+from app.client.auth_manager import AuthManager
+from app.client.collaboration_client import CollaborationClient
+from app.dialogs.auth_dialog import AuthDialog, UserProfileDialog
+
 
 class MainWindow(QMainWindow):
     """
@@ -35,6 +41,8 @@ class MainWindow(QMainWindow):
     - Canvas for drawing
     - Layer panel for layer management
     - Status bar for feedback
+    - User authentication and cloud storage
+    - Real-time collaboration
     """
     
     def __init__(self):
@@ -48,6 +56,9 @@ class MainWindow(QMainWindow):
         self.tool_manager = ToolManager()
         self.file_handler = FileHandler()
         
+        # Initialize client components
+        self._init_client_components()
+        
         # Initialize UI
         self._init_ui()
         self._create_menus()
@@ -57,6 +68,29 @@ class MainWindow(QMainWindow):
         # Settings
         self.settings = QSettings("DrawingApp", "DrawingApp")
         self._load_settings()
+        
+        # Try auto-login
+        self._try_auto_login()
+        
+        # Current cloud file ID
+        self._cloud_file_id: Optional[int] = None
+        self._file_version: int = 0
+    
+    def _init_client_components(self):
+        """Initialize API client and authentication components."""
+        # API client
+        self.api_client = APIClient()
+        
+        # Auth manager
+        self.auth_manager = AuthManager(self.api_client)
+        
+        # Collaboration client
+        self.collaboration_client = CollaborationClient()
+    
+    def _try_auto_login(self):
+        """Try to auto-login with saved credentials."""
+        if self.auth_manager.try_auto_login():
+            self._on_logged_in(self.auth_manager.current_user)
     
     def _init_ui(self):
         """Initialize the user interface."""
@@ -136,6 +170,12 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self._open_project)
         file_menu.addAction(open_action)
         
+        # Open from Cloud action
+        self.open_cloud_action = QAction("Open from &Cloud...", self)
+        self.open_cloud_action.triggered.connect(self._open_from_cloud)
+        self.open_cloud_action.setEnabled(False)
+        file_menu.addAction(self.open_cloud_action)
+        
         # Save action
         save_action = QAction("&Save", self)
         save_action.setShortcut(QKeySequence.Save)
@@ -147,6 +187,12 @@ class MainWindow(QMainWindow):
         save_as_action.setShortcut(QKeySequence.SaveAs)
         save_as_action.triggered.connect(self._save_project_as)
         file_menu.addAction(save_as_action)
+        
+        # Save to Cloud action
+        self.save_cloud_action = QAction("Save to Clou&d...", self)
+        self.save_cloud_action.triggered.connect(self._save_to_cloud)
+        self.save_cloud_action.setEnabled(False)
+        file_menu.addAction(self.save_cloud_action)
         
         file_menu.addSeparator()
         
@@ -245,6 +291,23 @@ class MainWindow(QMainWindow):
         toggle_overlay_action.toggled.connect(self.layer_manager.set_overlay_visible)
         layer_menu.addAction(toggle_overlay_action)
         
+        # Account menu
+        account_menu = menubar.addMenu("&Account")
+        
+        self.login_action = QAction("&Login...", self)
+        self.login_action.triggered.connect(self._show_login_dialog)
+        account_menu.addAction(self.login_action)
+        
+        self.profile_action = QAction("&Profile...", self)
+        self.profile_action.triggered.connect(self._show_profile_dialog)
+        self.profile_action.setEnabled(False)
+        account_menu.addAction(self.profile_action)
+        
+        self.logout_action = QAction("&Logout", self)
+        self.logout_action.triggered.connect(self._handle_logout)
+        self.logout_action.setEnabled(False)
+        account_menu.addAction(self.logout_action)
+        
         # Help menu
         help_menu = menubar.addMenu("&Help")
         
@@ -268,6 +331,10 @@ class MainWindow(QMainWindow):
         self.layer_label = QLabel("Layer: Background")
         self.status_bar.addWidget(self.layer_label)
         
+        # User label
+        self.user_label = QLabel("Not logged in")
+        self.status_bar.addWidget(self.user_label)
+        
         # Modified indicator
         self.modified_label = QLabel("")
         self.status_bar.addWidget(self.modified_label)
@@ -285,15 +352,218 @@ class MainWindow(QMainWindow):
         self.file_handler.file_saved.connect(self._on_file_saved)
         self.file_handler.file_opened.connect(self._on_file_opened)
         self.file_handler.file_error.connect(self._on_file_error)
+        
+        # Auth signals
+        self.auth_manager.logged_in.connect(self._on_logged_in)
+        self.auth_manager.logged_out.connect(self._on_logged_out)
+        
+        # Collaboration signals
+        self.collaboration_client.operation_received.connect(self._on_operation_received)
+        self.collaboration_client.user_joined.connect(self._on_user_joined)
+        self.collaboration_client.user_left.connect(self._on_user_left)
+    
+    def _on_logged_in(self, user: dict):
+        """Handle successful login."""
+        self.user_label.setText(f"User: {user.get('username', 'Unknown')}")
+        self.login_action.setEnabled(False)
+        self.profile_action.setEnabled(True)
+        self.logout_action.setEnabled(True)
+        self.open_cloud_action.setEnabled(True)
+        self.save_cloud_action.setEnabled(True)
+        
+        # Connect collaboration client
+        self.collaboration_client.set_token(self.api_client._access_token)
+    
+    def _on_logged_out(self):
+        """Handle logout."""
+        self.user_label.setText("Not logged in")
+        self.login_action.setEnabled(True)
+        self.profile_action.setEnabled(False)
+        self.logout_action.setEnabled(False)
+        self.open_cloud_action.setEnabled(False)
+        self.save_cloud_action.setEnabled(False)
+        
+        # Disconnect collaboration client
+        self.collaboration_client.clear_token()
+        self.collaboration_client.disconnect()
+        self._cloud_file_id = None
+    
+    def _show_login_dialog(self):
+        """Show the login dialog."""
+        dialog = AuthDialog(self.auth_manager, self)
+        dialog.exec_()
+    
+    def _show_profile_dialog(self):
+        """Show the user profile dialog."""
+        dialog = UserProfileDialog(self.auth_manager, self)
+        dialog.exec_()
+    
+    def _handle_logout(self):
+        """Handle logout button click."""
+        reply = QMessageBox.question(
+            self, "Logout",
+            "Are you sure you want to logout?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.auth_manager.logout()
+    
+    def _open_from_cloud(self):
+        """Open a file from cloud storage."""
+        if not self.auth_manager.is_authenticated:
+            QMessageBox.warning(self, "Not Logged In", "Please login to access cloud files.")
+            return
+        
+        # Get list of files
+        data, error = self.api_client.list_files()
+        
+        if error:
+            QMessageBox.critical(self, "Error", f"Failed to load files: {error}")
+            return
+        
+        files = data.get('files', [])
+        
+        if not files:
+            QMessageBox.information(self, "No Files", "No files found in your cloud storage.")
+            return
+        
+        # Show file selection dialog
+        from PyQt5.QtWidgets import QDialog, QListWidget, QDialogButtonBox
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Open from Cloud")
+        dialog.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        label = QLabel("Select a file to open:")
+        layout.addWidget(label)
+        
+        file_list = QListWidget()
+        for f in files:
+            file_list.addItem(f"{f['name']} (v{f['version']})")
+        file_list.setProperty('files', files)
+        layout.addWidget(file_list)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.Open | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        
+        if dialog.exec_() == QDialog.Accepted and file_list.currentRow() >= 0:
+            selected_file = files[file_list.currentRow()]
+            self._load_cloud_file(selected_file['id'])
+    
+    def _load_cloud_file(self, file_id: int):
+        """Load a file from cloud storage."""
+        data, error = self.api_client.get_file(file_id, include_content=True)
+        
+        if error:
+            QMessageBox.critical(self, "Error", f"Failed to load file: {error}")
+            return
+        
+        file_data = data.get('file', {})
+        content = file_data.get('content', {})
+        
+        if content:
+            self.layer_manager.from_dict(content.get('layer_manager', {}))
+            self._cloud_file_id = file_id
+            self._file_version = file_data.get('version', 0)
+            self.canvas._buffer_valid = False
+            self.canvas.update()
+            self.setWindowTitle(f"Drawing Application - {file_data['name']} (Cloud)")
+    
+    def _save_to_cloud(self):
+        """Save current project to cloud storage."""
+        if not self.auth_manager.is_authenticated:
+            QMessageBox.warning(self, "Not Logged In", "Please login to save to cloud.")
+            return
+        
+        # Get file name
+        from PyQt5.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(
+            self, "Save to Cloud", "File name:",
+            QLineEdit.Normal,
+            os.path.basename(self.file_handler.current_file) if self.file_handler.current_file else "Untitled"
+        )
+        
+        if not ok or not name:
+            return
+        
+        # Prepare content
+        content = {
+            'layer_manager': self.layer_manager.to_dict(),
+            'tool_manager': self.tool_manager.to_dict()
+        }
+        
+        if self._cloud_file_id:
+            # Update existing file
+            data, error = self.api_client.update_file(
+                self._cloud_file_id, content, self._file_version
+            )
+        else:
+            # Create new file
+            data, error = self.api_client.create_file(name, content)
+        
+        if error:
+            QMessageBox.critical(self, "Error", f"Failed to save file: {error}")
+            return
+        
+        file_data = data.get('file', {})
+        self._cloud_file_id = file_data.get('id')
+        self._file_version = file_data.get('version', 1)
+        
+        QMessageBox.information(self, "Success", f"File saved to cloud as '{name}'")
+        self.setWindowTitle(f"Drawing Application - {name} (Cloud)")
+    
+    def _on_operation_received(self, operation: dict):
+        """Handle received operation from collaboration."""
+        # Apply operation to local state
+        op_type = operation.get('type')
+        op_data = operation.get('data', {})
+        
+        if op_type == 'full_sync':
+            content = op_data.get('content', {})
+            if content:
+                self.layer_manager.from_dict(content.get('layer_manager', {}))
+                self._file_version = operation.get('version', self._file_version)
+                self.canvas._buffer_valid = False
+                self.canvas.update()
+    
+    def _on_user_joined(self, data: dict):
+        """Handle user joined collaboration."""
+        username = data.get('username', 'Unknown')
+        self.status_bar.showMessage(f"{username} joined the session")
+    
+    def _on_user_left(self, data: dict):
+        """Handle user left collaboration."""
+        username = data.get('username', 'Unknown')
+        self.status_bar.showMessage(f"{username} left the session")
     
     def _on_drawing_changed(self):
         """Handle drawing changes."""
         self.file_handler.set_modified()
         self.modified_label.setText("*")
+        
+        # Send operation to collaboration if connected
+        if self.collaboration_client.is_connected and self._cloud_file_id:
+            content = {
+                'layer_manager': self.layer_manager.to_dict(),
+                'tool_manager': self.tool_manager.to_dict()
+            }
+            self.collaboration_client.send_operation('full_sync', {'content': content})
     
     def _on_cursor_position_changed(self, pos):
         """Handle cursor position change."""
         self.position_label.setText(f"X: {int(pos.x())}, Y: {int(pos.y())}")
+        
+        # Send cursor position to collaboration
+        if self.collaboration_client.is_connected and self._cloud_file_id:
+            self.collaboration_client.send_cursor_position({
+                'x': pos.x(),
+                'y': pos.y()
+            })
     
     def _on_file_saved(self, path: str):
         """Handle file saved."""
@@ -329,6 +599,8 @@ class MainWindow(QMainWindow):
         self.canvas._buffer_valid = False
         self.canvas.update()
         self.setWindowTitle("Drawing Application - Untitled")
+        self._cloud_file_id = None
+        self._file_version = 0
     
     def _open_project(self):
         """Open a project file."""
@@ -411,13 +683,15 @@ class MainWindow(QMainWindow):
         """Show about dialog."""
         QMessageBox.about(
             self, "About Drawing Application",
-            "Drawing Application v1.0\n\n"
+            "Drawing Application v2.0\n\n"
             "A modular Qt-based drawing application with:\n"
             "• Multiple drawing tools\n"
             "• Layer management\n"
             "• Text styles (headings, titles, lists)\n"
             "• Export to various formats\n"
-            "• Project save/load"
+            "• Project save/load\n"
+            "• Cloud storage\n"
+            "• Real-time collaboration"
         )
     
     def _load_settings(self):
@@ -497,6 +771,12 @@ class MainWindow(QMainWindow):
                 return
             if reply == QMessageBox.Yes:
                 self._save_project()
+        
+        # Disconnect collaboration
+        self.collaboration_client.disconnect()
+        
+        # Close API client
+        self.api_client.close()
         
         # Save settings
         self.settings.setValue("geometry", self.saveGeometry())

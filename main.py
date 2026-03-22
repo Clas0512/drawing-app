@@ -8,6 +8,8 @@ A modular Qt-based drawing application with:
 - Text styles (headings, titles, bold, italic, lists)
 - File save/open with custom .draw format
 - Export to PNG, JPEG, SVG
+- User authentication and cloud storage
+- Real-time collaboration
 
 Run with: python main.py
 """
@@ -29,7 +31,7 @@ def main():
     # Create application
     app = QApplication(sys.argv)
     app.setApplicationName("Drawing Application")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("2.0.0")
     app.setOrganizationName("DrawingApp")
     
     # Set application style

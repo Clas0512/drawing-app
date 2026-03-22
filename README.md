@@ -1,6 +1,6 @@
 # Drawing Application
 
-A modular Qt-based drawing application with layer support, multiple drawing tools, text styles, and file management.
+A modular Qt-based drawing application with layer support, multiple drawing tools, text styles, file management, user authentication, and real-time collaboration.
 
 ## Features
 
@@ -40,20 +40,59 @@ A modular Qt-based drawing application with layer support, multiple drawing tool
 - **Save/Open** - Custom `.draw` project format
 - **Export** - PNG, JPEG, SVG formats
 - **Auto-save** - Optional background saving
+- **Cloud Storage** - Save to cloud with user account
+
+### User Authentication
+- **Sign Up** - Create new user account
+- **Login/Logout** - Session management
+- **User Profile** - View and manage profile
+- **Storage Quota** - 100MB default storage limit
+
+### Real-time Collaboration
+- **File Sharing** - Share files with other users
+- **Permission Levels** - View, Edit, Admin permissions
+- **Live Editing** - Multiple users edit simultaneously
+- **Cursor Sharing** - See other users' cursors
+- **Operation Sync** - Real-time operation broadcasting
 
 ## Project Structure
 
 ```
+drawing-app/
 ├── main.py                 # Application entry point
+├── run_server.py           # Flask server entry point
+├── alembic.ini             # Database migration config
+├── .env.example            # Environment variables template
 ├── app/
 │   ├── __init__.py
 │   ├── main_window.py      # Main application window
 │   ├── canvas.py           # Drawing canvas widget
 │   ├── layer_panel.py      # Layer management panel
 │   ├── toolbar.py          # Tools and styles toolbar
+│   ├── client/             # Client-side API services
+│   │   ├── api_client.py   # HTTP API client
+│   │   ├── auth_manager.py # Authentication manager
+│   │   └── collaboration_client.py # WebSocket client
 │   ├── dialogs/
 │   │   ├── __init__.py
-│   │   └── export_dialog.py
+│   │   ├── element_edit_dialog.py
+│   │   ├── export_dialog.py
+│   │   └── auth_dialog.py  # Login/Signup dialogs
+│   ├── server/             # Flask server components
+│   │   ├── config.py       # Server configuration
+│   │   ├── app_factory.py  # Flask app factory
+│   │   ├── models/         # Database models
+│   │   │   ├── user.py     # User model
+│   │   │   └── file.py     # File, Collaborator, Operation models
+│   │   ├── routes/         # API routes
+│   │   │   ├── auth_routes.py
+│   │   │   ├── user_routes.py
+│   │   │   ├── file_routes.py
+│   │   │   └── collaboration_routes.py
+│   │   └── services/       # Business logic services
+│   │       ├── auth_service.py
+│   │       ├── file_service.py
+│   │       └── collaboration_service.py
 │   └── core/
 │       ├── __init__.py
 │       ├── layer.py        # Layer and LayerGroup classes
@@ -62,8 +101,8 @@ A modular Qt-based drawing application with layer support, multiple drawing tool
 │       ├── tool_manager.py
 │       ├── style.py        # Style definitions
 │       └── file_handler.py # Save/Open/Export
-├── pyproject.toml
-└── poetry.lock
+├── migrations/             # Database migrations
+└── pyproject.toml
 ```
 
 ## Installation
@@ -73,14 +112,41 @@ A modular Qt-based drawing application with layer support, multiple drawing tool
 poetry install
 
 # Or using pip
-pip install PyQt5 Pillow
+pip install PyQt5 Pillow Flask Flask-SQLAlchemy Flask-Login Flask-SocketIO \
+            Flask-CORS psycopg[binary] alembic PyJWT passlib python-dotenv \
+            httpx python-socketio email-validator authlib
+```
+
+## Database Setup
+
+```bash
+# Create PostgreSQL database
+createdb drawing_app
+
+# Run migrations
+alembic upgrade head
+
+# Or initialize database directly
+flask init-db
 ```
 
 ## Usage
 
+### Running the Client Application
+
 ```bash
-# Run the application
+# Run the Qt application
 python main.py
+```
+
+### Running the Server
+
+```bash
+# Run the Flask API server
+python run_server.py
+
+# Or with specific options
+python run_server.py --host 0.0.0.0 --port 5000 --debug
 ```
 
 ### Keyboard Shortcuts
@@ -105,6 +171,41 @@ python main.py
 | Ctrl+0 | Reset zoom |
 | Delete | Clear current layer |
 
+## API Endpoints
+
+### Authentication
+- `POST /api/auth/register` - Register new user
+- `POST /api/auth/login` - Login user
+- `POST /api/auth/logout` - Logout user
+- `POST /api/auth/refresh` - Refresh access token
+- `GET /api/auth/me` - Get current user info
+
+### Users
+- `GET /api/users/<id>` - Get user profile
+- `PUT /api/users/<id>` - Update user profile
+- `DELETE /api/users/<id>` - Delete user account
+- `GET /api/users/<id>/storage` - Get storage info
+- `GET /api/users/search` - Search users
+
+### Files
+- `GET /api/files` - List accessible files
+- `POST /api/files` - Create new file
+- `GET /api/files/<id>` - Get file by ID
+- `PUT /api/files/<id>` - Update file content
+- `DELETE /api/files/<id>` - Delete file
+- `POST /api/files/<id>/rename` - Rename file
+- `POST /api/files/<id>/share` - Share file with user
+- `POST /api/files/<id>/unshare` - Remove user access
+- `POST /api/files/<id>/visibility` - Set public visibility
+
+### Collaboration (WebSocket)
+- `join_file` - Join a file's collaboration room
+- `leave_file` - Leave collaboration room
+- `operation` - Send drawing operation
+- `request_sync` - Request missed operations
+- `cursor_move` - Send cursor position
+- `selection_change` - Send selection update
+
 ## Architecture
 
 The application follows a modular architecture:
@@ -122,6 +223,27 @@ The application follows a modular architecture:
    - `toolbar.py` - Tools and style controls
    - `layer_panel.py` - Layer management UI
    - `main_window.py` - Main application window
+
+3. **Server Module** (`app/server/`) - Flask API server:
+   - `models/` - SQLAlchemy database models
+   - `routes/` - API endpoint handlers
+   - `services/` - Business logic services
+
+4. **Client Module** (`app/client/`) - Qt client services:
+   - `api_client.py` - HTTP API client
+   - `auth_manager.py` - Authentication state management
+   - `collaboration_client.py` - WebSocket client
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and configure:
+
+```env
+FLASK_ENV=development
+SECRET_KEY=your-secret-key
+JWT_SECRET_KEY=your-jwt-secret
+DATABASE_URL=postgresql://user:pass@localhost:5432/drawing_app
+```
 
 ## Extending the Application
 
