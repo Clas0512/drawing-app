@@ -29,6 +29,7 @@ from app.client.api_client import APIClient
 from app.client.auth_manager import AuthManager
 from app.client.collaboration_client import CollaborationClient
 from app.dialogs.auth_dialog import AuthDialog, UserProfileDialog
+from app.dialogs.file_sharing_dialog import FileListDialog, FileShareDialog
 
 
 class MainWindow(QMainWindow):
@@ -308,6 +309,22 @@ class MainWindow(QMainWindow):
         self.logout_action.setEnabled(False)
         account_menu.addAction(self.logout_action)
         
+        # Files menu (cloud file management)
+        files_menu = menubar.addMenu("&Files")
+        
+        self.my_files_action = QAction("&My Files...", self)
+        self.my_files_action.setShortcut("Ctrl+Shift+F")
+        self.my_files_action.triggered.connect(self._show_file_manager)
+        self.my_files_action.setEnabled(False)
+        files_menu.addAction(self.my_files_action)
+        
+        files_menu.addSeparator()
+        
+        self.share_file_action = QAction("&Share Current File...", self)
+        self.share_file_action.triggered.connect(self._share_current_file)
+        self.share_file_action.setEnabled(False)
+        files_menu.addAction(self.share_file_action)
+        
         # Help menu
         help_menu = menubar.addMenu("&Help")
         
@@ -370,6 +387,8 @@ class MainWindow(QMainWindow):
         self.logout_action.setEnabled(True)
         self.open_cloud_action.setEnabled(True)
         self.save_cloud_action.setEnabled(True)
+        self.my_files_action.setEnabled(True)
+        self.share_file_action.setEnabled(True)
         
         # Connect collaboration client
         self.collaboration_client.set_token(self.api_client._access_token)
@@ -382,6 +401,8 @@ class MainWindow(QMainWindow):
         self.logout_action.setEnabled(False)
         self.open_cloud_action.setEnabled(False)
         self.save_cloud_action.setEnabled(False)
+        self.my_files_action.setEnabled(False)
+        self.share_file_action.setEnabled(False)
         
         # Disconnect collaboration client
         self.collaboration_client.clear_token()
@@ -454,6 +475,48 @@ class MainWindow(QMainWindow):
         if dialog.exec_() == QDialog.Accepted and file_list.currentRow() >= 0:
             selected_file = files[file_list.currentRow()]
             self._load_cloud_file(selected_file['id'])
+    
+    def _show_file_manager(self):
+        """Show the file manager dialog (My Files)."""
+        if not self.auth_manager.is_authenticated:
+            QMessageBox.warning(self, "Not Logged In", "Please login to access your files.")
+            return
+        
+        dialog = FileListDialog(self.api_client, self.auth_manager, self)
+        dialog.file_opened.connect(self._on_file_manager_open)
+        dialog.exec_()
+    
+    def _on_file_manager_open(self, file_data: dict):
+        """Handle file opened from file manager."""
+        file_id = file_data.get('id')
+        if file_id:
+            self._load_cloud_file(file_id)
+    
+    def _share_current_file(self):
+        """Open share dialog for current cloud file."""
+        if not self.auth_manager.is_authenticated:
+            QMessageBox.warning(self, "Not Logged In", "Please login to share files.")
+            return
+        
+        if not self._cloud_file_id:
+            QMessageBox.information(
+                self, "No Cloud File",
+                "Please save this file to cloud first, then share it.\n\n"
+                "Use File > Save to Cloud..."
+            )
+            return
+        
+        # Load file data
+        data, error = self.api_client.get_file(self._cloud_file_id, include_content=False)
+        
+        if error:
+            QMessageBox.critical(self, "Error", f"Failed to load file: {error}")
+            return
+        
+        file_data = data.get('file', {})
+        
+        dialog = FileShareDialog(file_data, self.api_client, self.auth_manager, self)
+        dialog.exec_()
     
     def _load_cloud_file(self, file_id: int):
         """Load a file from cloud storage."""
