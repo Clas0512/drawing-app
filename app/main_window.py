@@ -529,6 +529,10 @@ class MainWindow(QMainWindow):
         file_data = data.get('file', {})
         content = file_data.get('content', {})
         
+        # Leave previous collaboration room if any
+        if self._cloud_file_id and self.collaboration_client.is_connected:
+            self.collaboration_client.leave_file(self._cloud_file_id)
+        
         if content:
             self.layer_manager.from_dict(content.get('layer_manager', {}))
             self._cloud_file_id = file_id
@@ -536,6 +540,10 @@ class MainWindow(QMainWindow):
             self.canvas._buffer_valid = False
             self.canvas.update()
             self.setWindowTitle(f"Drawing Application - {file_data['name']} (Cloud)")
+            
+            # Join collaboration room for real-time sync with other users
+            if self.collaboration_client.is_connected:
+                self.collaboration_client.join_file(file_id)
     
     def _save_to_cloud(self):
         """Save current project to cloud storage."""
@@ -574,7 +582,16 @@ class MainWindow(QMainWindow):
             return
         
         file_data = data.get('file', {})
-        self._cloud_file_id = file_data.get('id')
+        new_file_id = file_data.get('id')
+        
+        # If this is a new file (not an update), join collaboration room
+        if self._cloud_file_id != new_file_id:
+            if self._cloud_file_id and self.collaboration_client.is_connected:
+                self.collaboration_client.leave_file(self._cloud_file_id)
+            self._cloud_file_id = new_file_id
+            if self.collaboration_client.is_connected:
+                self.collaboration_client.join_file(new_file_id)
+        
         self._file_version = file_data.get('version', 1)
         
         QMessageBox.information(self, "Success", f"File saved to cloud as '{name}'")
@@ -657,6 +674,10 @@ class MainWindow(QMainWindow):
                 return
             if reply == QMessageBox.Yes:
                 self._save_project()
+        
+        # Leave collaboration room for previous file
+        if self._cloud_file_id and self.collaboration_client.is_connected:
+            self.collaboration_client.leave_file(self._cloud_file_id)
         
         self.file_handler.new_project(self.layer_manager, self.tool_manager)
         self.canvas._buffer_valid = False
@@ -834,6 +855,10 @@ class MainWindow(QMainWindow):
                 return
             if reply == QMessageBox.Yes:
                 self._save_project()
+        
+        # Leave collaboration room if in one
+        if self._cloud_file_id and self.collaboration_client.is_connected:
+            self.collaboration_client.leave_file(self._cloud_file_id)
         
         # Disconnect collaboration
         self.collaboration_client.disconnect()
