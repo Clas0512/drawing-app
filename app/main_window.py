@@ -420,6 +420,9 @@ class MainWindow(QMainWindow):
         self.collaboration_client.operation_received.connect(self._on_operation_received)
         self.collaboration_client.user_joined.connect(self._on_user_joined)
         self.collaboration_client.user_left.connect(self._on_user_left)
+        self.collaboration_client.sync_received.connect(self._on_sync_received)
+        self.collaboration_client.connected.connect(self._on_collaboration_connected)
+        self.collaboration_client.disconnected.connect(self._on_collaboration_disconnected)
     
     def _on_logged_in(self, user: dict):
         """Handle successful login."""
@@ -432,8 +435,9 @@ class MainWindow(QMainWindow):
         self.my_files_action.setEnabled(True)
         self.share_file_action.setEnabled(True)
         
-        # Connect collaboration client
+        # Connect collaboration client for real-time sync
         self.collaboration_client.set_token(self.api_client._access_token)
+        self.collaboration_client.connect()
         
         # Refresh pages with new user data
         self._refresh_all_pages()
@@ -604,10 +608,15 @@ class MainWindow(QMainWindow):
             self.canvas._buffer_valid = False
             self.canvas.update()
             self.setWindowTitle(f"Drawing Application - {file_data['name']} (Cloud)")
-            
-            # Join collaboration room for real-time sync with other users
-            if self.collaboration_client.is_connected:
-                self.collaboration_client.join_file(file_id)
+        
+        # Join collaboration room for real-time sync with other users
+        # Try to connect if not already connected
+        if not self.collaboration_client.is_connected:
+            self.collaboration_client.connect()
+        
+        # Join the file room (will work immediately if connected, or when connection is established)
+        if self.collaboration_client.is_connected:
+            self.collaboration_client.join_file(file_id)
     
     def _save_to_cloud(self):
         """Save current project to cloud storage."""
@@ -670,10 +679,46 @@ class MainWindow(QMainWindow):
         if op_type == 'full_sync':
             content = op_data.get('content', {})
             if content:
+                # Block drawing_changed signal to prevent echo
+                self.canvas.drawing_changed.disconnect()
+                
                 self.layer_manager.from_dict(content.get('layer_manager', {}))
                 self._file_version = operation.get('version', self._file_version)
                 self.canvas._buffer_valid = False
                 self.canvas.update()
+                
+                # Reconnect signal
+                self.canvas.drawing_changed.connect(self._on_drawing_changed)
+                
+                # Show notification
+                username = operation.get('username', 'Another user')
+                self.status_bar.showMessage(f"{username} made changes", 3000)
+    
+    def _on_sync_received(self, sync_data: dict):
+        """Handle full sync received from collaboration."""
+        content = sync_data.get('content', {})
+        if content:
+            # Block drawing_changed signal to prevent echo
+            self.canvas.drawing_changed.disconnect()
+            
+            self.layer_manager.from_dict(content.get('layer_manager', {}))
+            self._file_version = sync_data.get('version', self._file_version)
+            self.canvas._buffer_valid = False
+            self.canvas.update()
+            
+            # Reconnect signal
+            self.canvas.drawing_changed.connect(self._on_drawing_changed)
+    
+    def _on_collaboration_connected(self):
+        """Handle collaboration client connected."""
+        # Join the current cloud file if any
+        if self._cloud_file_id:
+            self.collaboration_client.join_file(self._cloud_file_id)
+        self.status_bar.showMessage("Connected for real-time sync", 3000)
+    
+    def _on_collaboration_disconnected(self):
+        """Handle collaboration client disconnected."""
+        self.status_bar.showMessage("Disconnected from real-time sync", 3000)
     
     def _on_user_joined(self, data: dict):
         """Handle user joined collaboration."""

@@ -257,51 +257,34 @@ class Canvas(QWidget):
         self.update()
     
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """Handle double-click for editing elements or creating text."""
+        """Handle double-click for editing elements or creating text on empty space."""
         if event.button() == Qt.LeftButton:
             point = self._get_canvas_point(event.pos())
             widget_point = event.pos()
             
-            # Check if we're in Text tool mode
-            current_tool = self.tool_manager.get_current_tool()
-            tool_name = current_tool.name if current_tool else ""
+            # First, try to find an element at the click position
+            element_found = self._find_element_at(point)
             
-            if tool_name == "Text":
-                # Create inline text editor at the click position
-                self._create_inline_text_at(point, widget_point)
+            if element_found:
+                # Open edit dialog for the found element
+                self._edit_element(element_found)
             else:
-                # Try to edit existing element
-                self._open_edit_dialog_at(point)
+                # No element found - create inline text on empty space
+                # This works in any tool mode
+                self._create_inline_text_at(point, widget_point)
     
-    def _create_inline_text_at(self, canvas_point: QPointF, widget_point):
-        """Create an inline text editor at the given position."""
+    def _find_element_at(self, point):
+        """Find an element at the given canvas point. Returns the element or None."""
         current_layer = self.layer_manager.get_current_layer()
         if not current_layer or current_layer.locked:
-            return
+            return None
         
-        # Position the inline editor
-        self._inline_text_editor.set_position(
-            canvas_point, 
-            QPointF(widget_point),
-            current_layer,
-            self.tool_manager
-        )
-        self._inline_text_editor.show()
-        self._inline_text_editor.setFocus()
-    
-    def _open_edit_dialog_at(self, point):
-        """Open edit dialog for element at point."""
-        current_layer = self.layer_manager.get_current_layer()
-        if not current_layer or current_layer.locked:
-            return
-        
-        # Try to find existing element to edit (check full bounding area for shapes)
         tol = 15
         for element in reversed(current_layer.elements):
-            found = False
             if not element.points:
                 continue
             
+            found = False
             if element.element_type in ['rectangle', 'ellipse', 'box'] and len(element.points) >= 2:
                 # Check if point is inside bounding rect
                 x1, y1 = element.points[0].x(), element.points[0].y()
@@ -326,17 +309,38 @@ class Canvas(QWidget):
                         break
             
             if found:
-                try:
-                    from app.dialogs.element_edit_dialog import ElementEditDialog
-                    dialog = ElementEditDialog(element, self)
-                    if dialog.exec_() == dialog.Accepted:
-                        dialog.apply_changes()
-                        self._buffer_valid = False
-                        self.update()
-                        self.drawing_changed.emit()
-                except Exception:
-                    pass
-                return
+                return element
+        
+        return None
+    
+    def _edit_element(self, element):
+        """Open edit dialog for an element."""
+        try:
+            from app.dialogs.element_edit_dialog import ElementEditDialog
+            dialog = ElementEditDialog(element, self)
+            if dialog.exec_() == dialog.Accepted:
+                dialog.apply_changes()
+                self._buffer_valid = False
+                self.update()
+                self.drawing_changed.emit()
+        except Exception:
+            pass
+    
+    def _create_inline_text_at(self, canvas_point: QPointF, widget_point):
+        """Create an inline text editor at the given position."""
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer or current_layer.locked:
+            return
+        
+        # Position the inline editor
+        self._inline_text_editor.set_position(
+            canvas_point, 
+            QPointF(widget_point),
+            current_layer,
+            self.tool_manager
+        )
+        self._inline_text_editor.show()
+        self._inline_text_editor.setFocus()
     
     def _point_near_line(self, point, p1, p2, tol=15):
         """Check if point is near a line segment."""
