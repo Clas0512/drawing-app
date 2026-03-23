@@ -690,17 +690,19 @@ class MainWindow(QMainWindow):
         self.file_handler.set_modified()
         self.modified_label.setText("*")
         
+        # Prepare content for sync/save
+        content = {
+            'layer_manager': self.layer_manager.to_dict(),
+            'tool_manager': self.tool_manager.to_dict()
+        }
+        
         # Send operation to collaboration if connected
         if self.collaboration_client.is_connected and self._cloud_file_id:
-            content = {
-                'layer_manager': self.layer_manager.to_dict(),
-                'tool_manager': self.tool_manager.to_dict()
-            }
             self.collaboration_client.send_operation('full_sync', {'content': content})
-            
-            # Auto-save immediately for shared files
-            if self._cloud_file_id:
-                self._save_shared_file_immediately(self._cloud_file_id, content)
+        
+        # Auto-save immediately for any cloud/shared file (not just when collaborating)
+        if self._cloud_file_id and self.auth_manager.is_authenticated:
+            self._save_shared_file_immediately(self._cloud_file_id, content)
     
     def _save_shared_file_immediately(self, file_id: int, content: dict):
         """Save shared file immediately when changes are made."""
