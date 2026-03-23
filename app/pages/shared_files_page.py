@@ -2,7 +2,6 @@
 Shared Files Page Module
 
 Provides a full-page widget for browsing and managing shared files.
-Includes auto-save functionality for shared files.
 """
 
 from typing import Optional, List, Dict, Any
@@ -28,13 +27,11 @@ class SharedFilesPage(QWidget):
     - List of owned files with sharing options
     - List of shared files from other users
     - File sharing management
-    - Auto-save functionality
     """
     
     # Signals
     back_requested = pyqtSignal()
     file_opened = pyqtSignal(dict)  # File data
-    auto_save_triggered = pyqtSignal(int, dict)  # file_id, content
     
     def __init__(self, auth_manager: AuthManager, api_client: APIClient, parent=None):
         super().__init__(parent)
@@ -45,14 +42,6 @@ class SharedFilesPage(QWidget):
         self._owned_files: List[Dict[str, Any]] = []
         self._shared_files: List[Dict[str, Any]] = []
         self._current_file: Optional[Dict[str, Any]] = None
-        
-        # Auto-save timer (saves every 30 seconds when file is modified)
-        self._auto_save_timer = QTimer()
-        self._auto_save_timer.setInterval(30000)  # 30 seconds
-        self._auto_save_timer.timeout.connect(self._auto_save)
-        
-        self._pending_auto_save = False
-        self._auto_save_content: Optional[dict] = None
         
         self._setup_ui()
         self._load_files()
@@ -83,11 +72,6 @@ class SharedFilesPage(QWidget):
         """)
         header_layout.addWidget(back_btn)
         header_layout.addStretch()
-        
-        # Auto-save indicator
-        self.auto_save_label = QLabel("Auto-save: Enabled")
-        self.auto_save_label.setStyleSheet("color: #27ae60; font-size: 12px;")
-        header_layout.addWidget(self.auto_save_label)
         
         layout.addLayout(header_layout)
         
@@ -400,37 +384,6 @@ class SharedFilesPage(QWidget):
                 QMessageBox.critical(self, "Error", f"Failed to delete: {error}")
             else:
                 self._load_files()
-    
-    def schedule_auto_save(self, file_id: int, content: dict):
-        """Schedule an auto-save for a shared file."""
-        self._pending_auto_save = True
-        self._auto_save_file_id = file_id
-        self._auto_save_content = content
-        
-        if not self._auto_save_timer.isActive():
-            self._auto_save_timer.start()
-            self.auto_save_label.setText("Auto-save: Pending...")
-            self.auto_save_label.setStyleSheet("color: #f39c12; font-size: 12px;")
-    
-    def _auto_save(self):
-        """Perform auto-save if there are pending changes."""
-        if self._pending_auto_save and self._auto_save_content:
-            self.auto_save_label.setText("Auto-save: Saving...")
-            self.auto_save_label.setStyleSheet("color: #3498db; font-size: 12px;")
-            
-            self.auto_save_triggered.emit(self._auto_save_file_id, self._auto_save_content)
-            
-            self._pending_auto_save = False
-            self.auto_save_label.setText("Auto-save: Saved")
-            self.auto_save_label.setStyleSheet("color: #27ae60; font-size: 12px;")
-            
-            # Reset label after a moment
-            QTimer.singleShot(2000, lambda: self.auto_save_label.setText("Auto-save: Enabled"))
-    
-    def stop_auto_save(self):
-        """Stop the auto-save timer."""
-        self._auto_save_timer.stop()
-        self._pending_auto_save = False
     
     def refresh(self):
         """Refresh the page data."""

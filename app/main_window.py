@@ -176,7 +176,6 @@ class MainWindow(QMainWindow):
         self.shared_files_page = SharedFilesPage(self.auth_manager, self.api_client, self)
         self.shared_files_page.back_requested.connect(self._show_canvas_view)
         self.shared_files_page.file_opened.connect(self._on_file_manager_open)
-        self.shared_files_page.auto_save_triggered.connect(self._perform_auto_save)
         self.central_stack.addWidget(self.shared_files_page)
     
     def _show_canvas_view(self):
@@ -435,6 +434,12 @@ class MainWindow(QMainWindow):
         
         # Connect collaboration client
         self.collaboration_client.set_token(self.api_client._access_token)
+        
+        # Refresh pages with new user data
+        self._refresh_all_pages()
+        
+        # Show canvas view
+        self._show_canvas_view()
     
     def _on_logged_out(self):
         """Handle logout."""
@@ -451,6 +456,37 @@ class MainWindow(QMainWindow):
         self.collaboration_client.clear_token()
         self.collaboration_client.disconnect()
         self._cloud_file_id = None
+        
+        # Clear the canvas for new session
+        self._clear_canvas_for_new_user()
+        
+        # Return to canvas view
+        self._show_canvas_view()
+    
+    def _refresh_all_pages(self):
+        """Refresh all pages with current user data."""
+        # Refresh profile page
+        if hasattr(self, 'profile_page'):
+            self.profile_page._load_user_data()
+        
+        # Refresh shared files page
+        if hasattr(self, 'shared_files_page'):
+            self.shared_files_page._load_files()
+    
+    def _clear_canvas_for_new_user(self):
+        """Clear the canvas for a new user session."""
+        # Create a new project (clears all layers)
+        self.file_handler.new_project(self.layer_manager, self.tool_manager)
+        self._cloud_file_id = None
+        self._file_version = 0
+        self.canvas._buffer_valid = False
+        self.canvas.update()
+        self.setWindowTitle("Drawing Application - Untitled")
+        self.modified_label.setText("")
+        
+        # Clear history
+        self._history = []
+        self._history_index = -1
     
     def _show_login_dialog(self):
         """Show the login dialog."""
@@ -662,9 +698,23 @@ class MainWindow(QMainWindow):
             }
             self.collaboration_client.send_operation('full_sync', {'content': content})
             
-            # Schedule auto-save for shared files
+            # Auto-save immediately for shared files
             if self._cloud_file_id:
-                self.shared_files_page.schedule_auto_save(self._cloud_file_id, content)
+                self._save_shared_file_immediately(self._cloud_file_id, content)
+    
+    def _save_shared_file_immediately(self, file_id: int, content: dict):
+        """Save shared file immediately when changes are made."""
+        if not self.auth_manager.is_authenticated:
+            return
+        
+        data, error = self.api_client.update_file(
+            file_id, content, self._file_version
+        )
+        
+        if not error:
+            file_data = data.get('file', {})
+            self._file_version = file_data.get('version', self._file_version + 1)
+            self.status_bar.showMessage("Auto-saved", 2000)
     
     def _on_cursor_position_changed(self, pos):
         """Handle cursor position change."""
@@ -872,20 +922,6 @@ class MainWindow(QMainWindow):
             self.canvas.update()
         except Exception as e:
             pass
-    
-    def _perform_auto_save(self, file_id: int, content: dict):
-        """Perform auto-save to cloud."""
-        if not self.auth_manager.is_authenticated:
-            return
-        
-        data, error = self.api_client.update_file(
-            file_id, content, self._file_version
-        )
-        
-        if not error:
-            file_data = data.get('file', {})
-            self._file_version = file_data.get('version', self._file_version + 1)
-            self.status_bar.showMessage("Auto-saved", 3000)
     
     def closeEvent(self, event: QCloseEvent):
         """Handle window close event."""
