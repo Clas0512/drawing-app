@@ -6,16 +6,93 @@ layer rendering, and user interactions.
 """
 
 from typing import Optional
-from PyQt5.QtWidgets import QWidget
-from PyQt5.QtCore import Qt, QPointF, pyqtSignal, QTimer
+from PyQt5.QtWidgets import QWidget, QLineEdit, QVBoxLayout, QGraphicsOpacityEffect
+from PyQt5.QtCore import Qt, QPointF, pyqtSignal, QTimer, QRectF
 from PyQt5.QtGui import (
     QPainter, QColor, QPen, QBrush, QImage,
-    QMouseEvent, QPaintEvent, QResizeEvent, QKeyEvent
+    QMouseEvent, QPaintEvent, QResizeEvent, QKeyEvent, QFont, QCursor
 )
 
 from app.core.layer_manager import LayerManager
 from app.core.tool_manager import ToolManager
 from app.core.layer import Layer
+
+
+class InlineTextEditor(QLineEdit):
+    """Inline text editor widget for creating text directly on canvas."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        self.setStyleSheet("""
+            QLineEdit {
+                background-color: transparent;
+                border: none;
+                border-bottom: 2px solid #3498db;
+                padding: 2px;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border-bottom: 2px solid #2980b9;
+            }
+        """)
+        
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setMinimumWidth(200)
+        self.setPlaceholderText("Type here...")
+        
+        self._canvas_point = QPointF()
+        self._current_layer = None
+        self._tool_manager = None
+    
+    def set_position(self, canvas_point: QPointF, widget_pos: QPointF, layer, tool_manager):
+        """Set the editor position and context."""
+        self._canvas_point = canvas_point
+        self._current_layer = layer
+        self._tool_manager = tool_manager
+        
+        # Position in widget coordinates
+        self.move(int(widget_pos.x()), int(widget_pos.y()))
+        self.clear()
+        self.show()
+        self.setFocus()
+    
+    def get_canvas_point(self) -> QPointF:
+        """Get the canvas point where text should be created."""
+        return self._canvas_point
+    
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle key press events."""
+        if event.key() == Qt.Key_Escape:
+            self.hide()
+            return
+        elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            # Don't hide on Enter, allow multiline-style editing
+            self.setText(self.text() + '\n')
+            return
+        
+        super().keyPressEvent(event)
+    
+    def focusOutEvent(self, event):
+        """Handle focus out - create text element if there's content."""
+        text = self.text().strip()
+        if text and self._current_layer and self._canvas_point:
+            from app.core.layer import DrawingElement
+            
+            # Get current style from tool manager
+            style = {}
+            if self._tool_manager:
+                style = self._tool_manager.get_current_style().get_style_dict()
+            style['font_size'] = 14
+            
+            element = DrawingElement('text', style)
+            element.add_point(self._canvas_point)
+            element.set_text(text)
+            self._current_layer.add_element(element)
+        
+        self.hide()
+        self.clear()
 
 
 class Canvas(QWidget):
@@ -75,6 +152,24 @@ class Canvas(QWidget):
         self._buffer = QImage(self.canvas_width, self.canvas_height,
                               QImage.Format_ARGB32_Premultiplied)
         self._buffer_valid = False
+        
+        # Create inline text editor
+        self._inline_text_editor = InlineTextEditor(self)
+        self._inline_text_editor.hide()
+        self._inline_text_editor.textChanged.connect(self._on_inline_text_changed)
+        self._inline_text_editor.editingFinished.connect(self._on_inline_text_finished)
+    
+    def _on_inline_text_changed(self):
+        """Handle inline text changes."""
+        pass  # Could add live preview here
+    
+    def _on_inline_text_finished(self):
+        """Handle inline text editing finished."""
+        text = self._inline_text_editor.text().strip()
+        if text:
+            self._buffer_valid = False
+            self.update()
+            self.drawing_changed.emit()
     
     def _on_layer_changed(self, layer_id: str):
         """Handle layer content changes."""
@@ -162,13 +257,40 @@ class Canvas(QWidget):
         self.update()
     
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """Handle double-click for editing elements."""
+        """Handle double-click for editing elements or creating text."""
         if event.button() == Qt.LeftButton:
             point = self._get_canvas_point(event.pos())
-            self._open_edit_dialog_at(point)
+            widget_point = event.pos()
+            
+            # Check if we're in Text tool mode
+            current_tool = self.tool_manager.get_current_tool()
+            tool_name = current_tool.name if current_tool else ""
+            
+            if tool_name == "Text":
+                # Create inline text editor at the click position
+                self._create_inline_text_at(point, widget_point)
+            else:
+                # Try to edit existing element
+                self._open_edit_dialog_at(point)
+    
+    def _create_inline_text_at(self, canvas_point: QPointF, widget_point):
+        """Create an inline text editor at the given position."""
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer or current_layer.locked:
+            return
+        
+        # Position the inline editor
+        self._inline_text_editor.set_position(
+            canvas_point, 
+            QPointF(widget_point),
+            current_layer,
+            self.tool_manager
+        )
+        self._inline_text_editor.show()
+        self._inline_text_editor.setFocus()
     
     def _open_edit_dialog_at(self, point):
-        """Open edit dialog for element at point, or create new text if none found."""
+        """Open edit dialog for element at point."""
         current_layer = self.layer_manager.get_current_layer()
         if not current_layer or current_layer.locked:
             return
@@ -215,9 +337,6 @@ class Canvas(QWidget):
                 except Exception:
                     pass
                 return
-        
-        # No element found at point - create new text
-        self._create_text_at(point)
     
     def _point_near_line(self, point, p1, p2, tol=15):
         """Check if point is near a line segment."""
@@ -232,30 +351,6 @@ class Canvas(QWidget):
         nearest_x, nearest_y = x1 + t * dx, y1 + t * dy
         dist = ((x0 - nearest_x) ** 2 + (y0 - nearest_y) ** 2) ** 0.5
         return dist < tol
-    
-    def _create_text_at(self, point):
-        """Create a new text element at the given point."""
-        from PyQt5.QtWidgets import QInputDialog, QLineEdit
-        text, ok = QInputDialog.getText(
-            self, "New Text", "Enter text:",
-            QLineEdit.Normal, ""
-        )
-        if not ok or not text:
-            return
-        
-        from app.core.layer import DrawingElement
-        # Create text element with current style
-        style = self.tool_manager.get_current_style().get_style_dict()
-        style['font_size'] = 14
-        element = DrawingElement('text', style)
-        element.add_point(point)
-        element.set_text(text)
-        current_layer = self.layer_manager.get_current_layer()
-        current_layer.add_element(element)
-        
-        self._buffer_valid = False
-        self.update()
-        self.drawing_changed.emit()
     
     def mouseMoveEvent(self, event: QMouseEvent):
         """Handle mouse move events."""

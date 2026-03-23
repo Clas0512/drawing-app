@@ -160,7 +160,7 @@ def search_users(current_user):
     Search for users by username.
     
     Query Parameters:
-        q: Search query (min 2 characters)
+        q: Search query (min 1 character)
         limit: Maximum results (default 10, max 50)
     
     Returns:
@@ -169,8 +169,8 @@ def search_users(current_user):
     query = request.args.get('q', '').strip()
     limit = min(int(request.args.get('limit', 10)), 50)
     
-    if len(query) < 2:
-        return jsonify({'error': 'Query must be at least 2 characters'}), 400
+    if len(query) < 1:
+        return jsonify({'error': 'Query must be at least 1 character'}), 400
     
     users = User.query.filter(
         User.username.ilike(f'%{query}%'),

@@ -324,40 +324,17 @@ class TextTool(Tool):
         self.text_input_callback = callback
     
     def mouse_press(self, point: QPointF, layer: Layer) -> bool:
-        if layer.locked:
-            return False
-        
-        # Get text from callback if available
-        text = "Text"
-        if self.text_input_callback:
-            try:
-                result = self.text_input_callback()
-                if result:
-                    text = result
-            except Exception:
-                pass
-        elif self.pending_text:
-            text = self.pending_text
-        
-        self.start_point = point
-        self.current_element = DrawingElement('text', self.get_style_dict())
-        self.current_element.add_point(point)
-        self.current_element.set_text(text)
-        layer.add_element(self.current_element)
-        return True
+        # Text tool now works via double-click (inline editor)
+        # Single click does nothing
+        return False
     
     def mouse_move(self, point: QPointF, layer: Layer) -> bool:
         # Text doesn't update on move
         return False
     
     def mouse_release(self, point: QPointF, layer: Layer) -> Optional[DrawingElement]:
-        if self.current_element is None:
-            return None
-        
-        element = self.current_element
-        self.current_element = None
-        self.start_point = None
-        return element
+        # Text is handled by inline editor on double-click
+        return None
     
     def set_pending_text(self, text: str):
         """Set text to be used for next text element."""

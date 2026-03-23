@@ -553,13 +553,13 @@ class FileShareDialog(QDialog):
         self.add_btn.setEnabled(False)
         self.search_results.clear()
         
-        if len(text) >= 2:
+        if len(text) >= 1:
             self._search_timer.start(300)  # 300ms debounce
     
     def _perform_search(self):
         """Perform user search."""
         query = self.user_search.text().strip()
-        if len(query) < 2:
+        if len(query) < 1:
             return
         
         data, error = self.api_client.search_users(query, limit=10)

@@ -10,7 +10,7 @@ from typing import Optional
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QMenuBar, QMenu, QAction, QStatusBar, QLabel, QMessageBox,
-    QFileDialog, QToolBar, QDockWidget, QApplication
+    QFileDialog, QToolBar, QDockWidget, QApplication, QStackedWidget
 )
 from PyQt5.QtCore import Qt, QSettings, QSize
 from PyQt5.QtGui import QIcon, QKeySequence, QCloseEvent
@@ -30,6 +30,10 @@ from app.client.auth_manager import AuthManager
 from app.client.collaboration_client import CollaborationClient
 from app.dialogs.auth_dialog import AuthDialog, UserProfileDialog
 from app.dialogs.file_sharing_dialog import FileListDialog, FileShareDialog
+
+# Import pages
+from app.pages.profile_page import ProfilePage
+from app.pages.shared_files_page import SharedFilesPage
 
 
 class MainWindow(QMainWindow):
@@ -95,11 +99,13 @@ class MainWindow(QMainWindow):
     
     def _init_ui(self):
         """Initialize the user interface."""
-        # Central widget with splitter
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # Central widget with stacked layout for pages
+        self.central_stack = QStackedWidget()
+        self.setCentralWidget(self.central_stack)
         
-        main_layout = QHBoxLayout(central_widget)
+        # Main drawing view (canvas with panels)
+        main_widget = QWidget()
+        main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         
         # Create splitter for resizable panels
@@ -151,6 +157,43 @@ class MainWindow(QMainWindow):
         
         # Connect layer panel changes to canvas update
         self.layer_panel.layer_changed.connect(lambda: self.canvas.update())
+        
+        # Add main widget to stack
+        self.central_stack.addWidget(main_widget)
+        
+        # Create pages
+        self._create_pages()
+    
+    def _create_pages(self):
+        """Create page widgets for navigation."""
+        # Profile page
+        self.profile_page = ProfilePage(self.auth_manager, self.api_client, self)
+        self.profile_page.back_requested.connect(self._show_canvas_view)
+        self.profile_page.logout_requested.connect(self._handle_logout)
+        self.central_stack.addWidget(self.profile_page)
+        
+        # Shared files page
+        self.shared_files_page = SharedFilesPage(self.auth_manager, self.api_client, self)
+        self.shared_files_page.back_requested.connect(self._show_canvas_view)
+        self.shared_files_page.file_opened.connect(self._on_file_manager_open)
+        self.shared_files_page.auto_save_triggered.connect(self._perform_auto_save)
+        self.central_stack.addWidget(self.shared_files_page)
+    
+    def _show_canvas_view(self):
+        """Show the main canvas view."""
+        self.central_stack.setCurrentIndex(0)
+    
+    def _show_profile_page(self):
+        """Show the profile page."""
+        if self.auth_manager.is_authenticated:
+            self.profile_page.refresh()
+            self.central_stack.setCurrentWidget(self.profile_page)
+    
+    def _show_shared_files_page(self):
+        """Show the shared files page."""
+        if self.auth_manager.is_authenticated:
+            self.shared_files_page.refresh()
+            self.central_stack.setCurrentWidget(self.shared_files_page)
     
     def _create_menus(self):
         """Create the menu bar."""
@@ -300,7 +343,7 @@ class MainWindow(QMainWindow):
         account_menu.addAction(self.login_action)
         
         self.profile_action = QAction("&Profile...", self)
-        self.profile_action.triggered.connect(self._show_profile_dialog)
+        self.profile_action.triggered.connect(self._show_profile_page)
         self.profile_action.setEnabled(False)
         account_menu.addAction(self.profile_action)
         
@@ -314,7 +357,7 @@ class MainWindow(QMainWindow):
         
         self.my_files_action = QAction("&My Files...", self)
         self.my_files_action.setShortcut("Ctrl+Shift+F")
-        self.my_files_action.triggered.connect(self._show_file_manager)
+        self.my_files_action.triggered.connect(self._show_shared_files_page)
         self.my_files_action.setEnabled(False)
         files_menu.addAction(self.my_files_action)
         
@@ -414,11 +457,6 @@ class MainWindow(QMainWindow):
         dialog = AuthDialog(self.auth_manager, self)
         dialog.exec_()
     
-    def _show_profile_dialog(self):
-        """Show the user profile dialog."""
-        dialog = UserProfileDialog(self.auth_manager, self)
-        dialog.exec_()
-    
     def _handle_logout(self):
         """Handle logout button click."""
         reply = QMessageBox.question(
@@ -475,16 +513,6 @@ class MainWindow(QMainWindow):
         if dialog.exec_() == QDialog.Accepted and file_list.currentRow() >= 0:
             selected_file = files[file_list.currentRow()]
             self._load_cloud_file(selected_file['id'])
-    
-    def _show_file_manager(self):
-        """Show the file manager dialog (My Files)."""
-        if not self.auth_manager.is_authenticated:
-            QMessageBox.warning(self, "Not Logged In", "Please login to access your files.")
-            return
-        
-        dialog = FileListDialog(self.api_client, self.auth_manager, self)
-        dialog.file_opened.connect(self._on_file_manager_open)
-        dialog.exec_()
     
     def _on_file_manager_open(self, file_data: dict):
         """Handle file opened from file manager."""
@@ -633,6 +661,10 @@ class MainWindow(QMainWindow):
                 'tool_manager': self.tool_manager.to_dict()
             }
             self.collaboration_client.send_operation('full_sync', {'content': content})
+            
+            # Schedule auto-save for shared files
+            if self._cloud_file_id:
+                self.shared_files_page.schedule_auto_save(self._cloud_file_id, content)
     
     def _on_cursor_position_changed(self, pos):
         """Handle cursor position change."""
@@ -840,6 +872,20 @@ class MainWindow(QMainWindow):
             self.canvas.update()
         except Exception as e:
             pass
+    
+    def _perform_auto_save(self, file_id: int, content: dict):
+        """Perform auto-save to cloud."""
+        if not self.auth_manager.is_authenticated:
+            return
+        
+        data, error = self.api_client.update_file(
+            file_id, content, self._file_version
+        )
+        
+        if not error:
+            file_data = data.get('file', {})
+            self._file_version = file_data.get('version', self._file_version + 1)
+            self.status_bar.showMessage("Auto-saved", 3000)
     
     def closeEvent(self, event: QCloseEvent):
         """Handle window close event."""
