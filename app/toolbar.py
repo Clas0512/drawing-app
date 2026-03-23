@@ -126,7 +126,7 @@ class ToolToolbar(QWidget):
         
         # Tools section
         tools_group = QGroupBox("Tools")
-        tools_layout = QHBoxLayout(tools_group)
+        tools_layout = QVBoxLayout(tools_group)
         tools_layout.setSpacing(2)
         
         self.tool_buttons = {}
@@ -135,6 +135,7 @@ class ToolToolbar(QWidget):
         
         # Tool definitions with icons
         tools = [
+            ("Select", "🖐️", "S"),
             ("Pen", "✏️", "P"),
             ("Line", "📏", "L"),
             ("Rectangle", "⬜", "R"),
@@ -143,11 +144,17 @@ class ToolToolbar(QWidget):
             ("Box", "📦", "B"),
             ("Text", "T", "T"),
             ("List", "☰", "I"),
-            ("Select", "🖐️", "S"),
-            ("Eraser", "🧹", "E"),
+            ("Eraser", "🧹", "X"),
         ]
         
-        for name, icon, shortcut in tools:
+        # Create a horizontal row for each pair of tools
+        row_layout = None
+        for i, (name, icon, shortcut) in enumerate(tools):
+            if i % 2 == 0:
+                row_layout = QHBoxLayout()
+                row_layout.setSpacing(2)
+                tools_layout.addLayout(row_layout)
+            
             btn = QToolButton()
             btn.setText(icon)
             btn.setToolTip(f"{name} ({shortcut})")
@@ -160,7 +167,11 @@ class ToolToolbar(QWidget):
             
             self.tool_buttons[name] = btn
             self.tool_button_group.addButton(btn)
-            tools_layout.addWidget(btn)
+            row_layout.addWidget(btn)
+        
+        # Fill the last row if odd number of tools
+        if len(tools) % 2 != 0:
+            row_layout.addStretch()
         
         # Set default tool
         if "Pen" in self.tool_buttons:

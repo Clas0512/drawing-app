@@ -241,8 +241,22 @@ class Canvas(QWidget):
             current_layer = self.layer_manager.get_current_layer()
             if current_layer:
                 tool = self.tool_manager.get_current_tool()
+                modifiers = event.modifiers()
+                
+                # Check if clicking on an element in any tool mode
+                element_at_point = self._find_element_at(point)
+                
+                if element_at_point and tool.name != "Select":
+                    # Switch to Select tool when clicking on an element
+                    self.tool_manager.set_tool("Select")
+                    tool = self.tool_manager.get_current_tool()
+                
                 if tool:
-                    self.is_drawing = tool.mouse_press(point, current_layer)
+                    # Pass modifiers to SelectTool for multi-select
+                    if tool.name == "Select":
+                        self.is_drawing = tool.mouse_press(point, current_layer, modifiers)
+                    else:
+                        self.is_drawing = tool.mouse_press(point, current_layer)
                     self.last_point = point
                     
                     if self.is_drawing:
@@ -285,7 +299,16 @@ class Canvas(QWidget):
                 continue
             
             found = False
-            if element.element_type in ['rectangle', 'ellipse', 'box'] and len(element.points) >= 2:
+            
+            # Handle group elements - check if point is within group bounds
+            if element.element_type == 'group' and hasattr(element, 'child_elements'):
+                bounds = element.bounding_rect
+                if bounds.contains(point) or (
+                    bounds.left() - tol <= point.x() <= bounds.right() + tol and
+                    bounds.top() - tol <= point.y() <= bounds.bottom() + tol
+                ):
+                    found = True
+            elif element.element_type in ['rectangle', 'ellipse', 'box'] and len(element.points) >= 2:
                 # Check if point is inside bounding rect
                 x1, y1 = element.points[0].x(), element.points[0].y()
                 x2, y2 = element.points[1].x(), element.points[1].y()
@@ -456,6 +479,14 @@ class Canvas(QWidget):
         elif event.key() == Qt.Key_0 and event.modifiers() & Qt.ControlModifier:
             self.reset_zoom()
         
+        # Group shortcut (Ctrl+G)
+        elif event.key() == Qt.Key_G and event.modifiers() & Qt.ControlModifier:
+            self._group_selected_elements()
+        
+        # Ungroup shortcut (Ctrl+Shift+G)
+        elif event.key() == Qt.Key_G and event.modifiers() & Qt.ControlModifier and event.modifiers() & Qt.ShiftModifier:
+            self._ungroup_selected_element()
+        
         # Tool shortcuts
         elif event.key() == Qt.Key_P:
             self.tool_manager.set_tool("Pen")
@@ -479,15 +510,115 @@ class Canvas(QWidget):
                 pass
             else:
                 self.tool_manager.set_tool("Select")
-        elif event.key() == Qt.Key_Delete:
-            # Delete selected or clear current layer
+        elif event.key() == Qt.Key_Delete or event.key() == Qt.Key_Backspace:
+            # Delete selected elements
+            self._delete_selected_elements()
+        
+        self.update()
+    
+    def _group_selected_elements(self):
+        """Group selected elements together."""
+        select_tool = self.tool_manager.get_tool("Select")
+        if not select_tool or not hasattr(select_tool, 'selected_elements'):
+            return
+        
+        selected = select_tool.selected_elements
+        if len(selected) < 2:
+            return
+        
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer or current_layer.locked:
+            return
+        
+        # Create a group from selected elements
+        from app.core.layer import GroupElement
+        group = GroupElement(selected)
+        
+        # Remove selected elements from layer and add group
+        for element in selected:
+            if element in current_layer.elements:
+                current_layer.elements.remove(element)
+        
+        current_layer.add_element(group)
+        
+        # Clear selection and select the new group
+        select_tool.clear_selection()
+        select_tool.select_element(group)
+        
+        self._buffer_valid = False
+        self.drawing_changed.emit()
+    
+    def _ungroup_selected_element(self):
+        """Ungroup a selected group element."""
+        select_tool = self.tool_manager.get_tool("Select")
+        if not select_tool or not hasattr(select_tool, 'selected_elements'):
+            return
+        
+        selected = select_tool.selected_elements
+        if len(selected) != 1:
+            return
+        
+        group = selected[0]
+        if group.element_type != 'group':
+            return
+        
+        from app.core.layer import GroupElement
+        if not isinstance(group, GroupElement):
+            return
+        
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer or current_layer.locked:
+            return
+        
+        # Get child elements
+        children = group.child_elements.copy()
+        
+        # Remove group from layer
+        if group in current_layer.elements:
+            current_layer.elements.remove(group)
+        
+        # Add children back to layer
+        for child in children:
+            current_layer.add_element(child)
+        
+        # Select the ungrouped elements
+        select_tool.clear_selection()
+        for child in children:
+            select_tool.select_element(child, add_to_selection=True)
+        
+        self._buffer_valid = False
+        self.drawing_changed.emit()
+    
+    def _delete_selected_elements(self):
+        """Delete selected elements."""
+        select_tool = self.tool_manager.get_tool("Select")
+        if not select_tool or not hasattr(select_tool, 'selected_elements'):
+            # Fall back to clearing current layer
             current = self.layer_manager.get_current_layer()
             if current and not current.locked:
                 current.clear()
                 self._buffer_valid = False
                 self.update()
+            return
         
-        self.update()
+        selected = select_tool.selected_elements
+        if not selected:
+            return
+        
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer or current_layer.locked:
+            return
+        
+        # Remove selected elements from layer
+        for element in selected:
+            if element in current_layer.elements:
+                current_layer.elements.remove(element)
+        
+        # Clear selection
+        select_tool.clear_selection()
+        
+        self._buffer_valid = False
+        self.drawing_changed.emit()
     
     def paintEvent(self, event: QPaintEvent):
         """Handle paint events."""
@@ -518,6 +649,9 @@ class Canvas(QWidget):
                 # The element is already in the layer, just re-render
                 pass
         
+        # Draw selection borders for selected elements
+        self._draw_selection_borders(painter)
+        
         # Draw canvas boundary
         pen = QPen(QColor('#CCCCCC'))
         pen.setStyle(Qt.DashLine)
@@ -526,6 +660,62 @@ class Canvas(QWidget):
         painter.drawRect(0, 0, self.canvas_width, self.canvas_height)
         
         painter.end()
+    
+    def _draw_selection_borders(self, painter: QPainter):
+        """Draw selection borders around selected elements."""
+        select_tool = self.tool_manager.get_tool("Select")
+        if not select_tool or not hasattr(select_tool, 'selected_elements'):
+            return
+        
+        selected = select_tool.selected_elements
+        if not selected:
+            return
+        
+        # Draw blue border around each selected element
+        pen = QPen(QColor('#3498db'))  # Blue color
+        pen.setWidth(2)
+        pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        
+        for element in selected:
+            if not element.points:
+                continue
+            
+            # Handle group elements
+            if element.element_type == 'group' and hasattr(element, 'child_elements'):
+                # Draw border around the entire group
+                bounds = element.bounding_rect
+                painter.drawRect(int(bounds.left()) - 3, int(bounds.top()) - 3, 
+                                int(bounds.width()) + 6, int(bounds.height()) + 6)
+                continue
+            
+            # Get bounding rect for the element
+            if element.element_type in ['rectangle', 'ellipse', 'box'] and len(element.points) >= 2:
+                x1, y1 = element.points[0].x(), element.points[0].y()
+                x2, y2 = element.points[1].x(), element.points[1].y()
+                left, right = min(x1, x2), max(x1, x2)
+                top, bottom = min(y1, y2), max(y1, y2)
+                painter.drawRect(int(left) - 3, int(top) - 3, int(right - left) + 6, int(bottom - top) + 6)
+            elif element.element_type in ['line', 'arrow'] and len(element.points) >= 2:
+                # Draw small rectangles at endpoints
+                p1, p2 = element.points[0], element.points[1]
+                painter.drawRect(int(p1.x()) - 5, int(p1.y()) - 5, 10, 10)
+                painter.drawRect(int(p2.x()) - 5, int(p2.y()) - 5, 10, 10)
+            elif element.element_type == 'pen':
+                # Draw bounding rect for pen strokes
+                min_x = min(p.x() for p in element.points)
+                max_x = max(p.x() for p in element.points)
+                min_y = min(p.y() for p in element.points)
+                max_y = max(p.y() for p in element.points)
+                painter.drawRect(int(min_x) - 3, int(min_y) - 3, int(max_x - min_x) + 6, int(max_y - min_y) + 6)
+            else:
+                # Text, list, etc - draw around first point
+                p = element.points[0]
+                text = getattr(element, 'text', '') or 'Text'
+                text_width = len(text) * 8 + 20
+                text_height = 30
+                painter.drawRect(int(p.x()) - 5, int(p.y()) - 25, text_width + 10, text_height + 10)
     
     def _draw_grid(self, painter: QPainter):
         """Draw grid lines."""

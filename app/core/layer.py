@@ -93,6 +93,85 @@ class DrawingElement:
         return element
 
 
+class GroupElement(DrawingElement):
+    """A group of drawing elements that behave as a single unit."""
+    
+    def __init__(self, elements: List[DrawingElement] = None):
+        super().__init__('group', {})
+        self.child_elements: List[DrawingElement] = elements if elements else []
+        self._update_group_bounds()
+    
+    def add_element(self, element: DrawingElement):
+        """Add an element to the group."""
+        self.child_elements.append(element)
+        self._update_group_bounds()
+    
+    def _update_group_bounds(self):
+        """Update bounding rect to encompass all child elements."""
+        if not self.child_elements:
+            self.bounding_rect = QRectF()
+            return
+        
+        min_x = float('inf')
+        max_x = float('-inf')
+        min_y = float('inf')
+        max_y = float('-inf')
+        
+        for element in self.child_elements:
+            for p in element.points:
+                min_x = min(min_x, p.x())
+                max_x = max(max_x, p.x())
+                min_y = min(min_y, p.y())
+                max_y = max(max_y, p.y())
+        
+        if min_x != float('inf'):
+            self.bounding_rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y)
+            # Set a center point for the group
+            self.points = [QPointF((min_x + max_x) / 2, (min_y + max_y) / 2)]
+    
+    def move_by(self, delta_x: float, delta_y: float):
+        """Move all child elements by the given delta."""
+        for element in self.child_elements:
+            for p in element.points:
+                p.setX(p.x() + delta_x)
+                p.setY(p.y() + delta_y)
+            element._update_bounding_rect()
+        self._update_group_bounds()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert group to dictionary for serialization."""
+        return {
+            'id': self.id,
+            'type': 'group',
+            'style': self.style,
+            'children': [e.to_dict() for e in self.child_elements],
+            'bounding_rect': {
+                'x': self.bounding_rect.x(),
+                'y': self.bounding_rect.y(),
+                'width': self.bounding_rect.width(),
+                'height': self.bounding_rect.height()
+            },
+            'created_at': self.created_at.isoformat(),
+            'modified_at': self.modified_at.isoformat()
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'GroupElement':
+        """Create group from dictionary."""
+        group = cls()
+        group.id = data['id']
+        group.style = data.get('style', {})
+        group.child_elements = [
+            DrawingElement.from_dict(child) for child in data.get('children', [])
+        ]
+        rect = data.get('bounding_rect', {})
+        group.bounding_rect = QRectF(rect.get('x', 0), rect.get('y', 0),
+                                      rect.get('width', 0), rect.get('height', 0))
+        group.created_at = datetime.fromisoformat(data.get('created_at', datetime.now().isoformat()))
+        group.modified_at = datetime.fromisoformat(data.get('modified_at', datetime.now().isoformat()))
+        return group
+
+
 class Layer:
     """
     Represents a single layer in the drawing application.
@@ -326,6 +405,12 @@ class Layer:
                     else:
                         painter.drawText(int(start_pos.x()), int(start_pos.y() + y_offset), line)
                     y_offset += line_height
+        
+        elif element.element_type == 'group':
+            # Render all child elements in the group
+            if isinstance(element, GroupElement):
+                for child in element.child_elements:
+                    self._render_element(painter, child, scale)
     
     def _draw_arrow(self, painter: QPainter, start: QPointF, end: QPointF, pen_width: int):
         """Draw an arrow from start to end point."""

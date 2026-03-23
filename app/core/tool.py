@@ -464,9 +464,10 @@ class SelectTool(Tool):
     
     def __init__(self):
         super().__init__("Select", "🖐️")
-        self.selected_element: Optional[DrawingElement] = None
+        self.selected_elements: List[DrawingElement] = []  # Support multiple selection
         self.selection_offset = QPointF(0, 0)
         self.hit_tolerance = 10  # Pixels tolerance for hit detection
+        self._is_dragging = False
     
     def _point_in_element(self, point: QPointF, element: DrawingElement) -> bool:
         """Check if point is inside or near an element."""
@@ -555,44 +556,84 @@ class SelectTool(Tool):
         
         return dist < self.hit_tolerance
     
-    def mouse_press(self, point: QPointF, layer: Layer) -> bool:
+    def clear_selection(self):
+        """Clear all selected elements."""
+        self.selected_elements = []
+        self._is_dragging = False
+    
+    def select_element(self, element: DrawingElement, add_to_selection: bool = False):
+        """Select an element."""
+        if add_to_selection:
+            if element in self.selected_elements:
+                self.selected_elements.remove(element)
+            else:
+                self.selected_elements.append(element)
+        else:
+            self.selected_elements = [element]
+    
+    def mouse_press(self, point: QPointF, layer: Layer, modifiers: Qt.KeyboardModifiers = Qt.NoModifier) -> bool:
         self.start_point = point
         
         # Find element at point (check from top to bottom)
+        found_element = None
         for element in reversed(layer.elements):
             if self._point_in_element(point, element):
-                self.selected_element = element
-                # Calculate offset from first point
-                if element.points:
-                    self.selection_offset = QPointF(point.x() - element.points[0].x(),
-                                                    point.y() - element.points[0].y())
-                return True
+                found_element = element
+                break
         
-        self.selected_element = None
-        return False
+        if found_element:
+            # Check if shift is held for multi-select
+            add_to_selection = bool(modifiers & Qt.ShiftModifier)
+            
+            if found_element in self.selected_elements:
+                # Clicking on already selected element - start dragging
+                self._is_dragging = True
+            else:
+                # Select this element (add or replace)
+                self.select_element(found_element, add_to_selection)
+                self._is_dragging = True
+            
+            # Calculate offset from first selected element's first point
+            if self.selected_elements and self.selected_elements[0].points:
+                first_element = self.selected_elements[0]
+                self.selection_offset = QPointF(
+                    point.x() - first_element.points[0].x(),
+                    point.y() - first_element.points[0].y()
+                )
+            return True
+        else:
+            # Clicked on empty space - clear selection
+            self.clear_selection()
+            return False
     
     def mouse_move(self, point: QPointF, layer: Layer) -> bool:
-        if self.selected_element is None or layer.locked:
+        if not self.selected_elements or layer.locked or not self._is_dragging:
             return False
         
-        # Move all points by delta
+        # Move all selected elements by delta
         delta = QPointF(
             point.x() - self.start_point.x(),
             point.y() - self.start_point.y()
         )
         
-        for p in self.selected_element.points:
-            p.setX(p.x() + delta.x())
-            p.setY(p.y() + delta.y())
+        for element in self.selected_elements:
+            # Check if this is a group element
+            if element.element_type == 'group' and hasattr(element, 'move_by'):
+                element.move_by(delta.x(), delta.y())
+            else:
+                for p in element.points:
+                    p.setX(p.x() + delta.x())
+                    p.setY(p.y() + delta.y())
+                element._update_bounding_rect()
         
-        self.selected_element._update_bounding_rect()
         self.start_point = point
         layer.modified_at = layer.modified_at.__class__.now()
         layer._thumbnail = None
         return True
     
     def mouse_release(self, point: QPointF, layer: Layer) -> Optional[DrawingElement]:
-        element = self.selected_element
-        self.selected_element = None
-        self.start_point = None
-        return element
+        self._is_dragging = False
+        if self.selected_elements:
+            self.start_point = None
+            return self.selected_elements[0]  # Return first for compatibility
+        return None
